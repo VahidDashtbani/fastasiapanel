@@ -543,8 +543,8 @@
       opt('trojan', 'Trojan', proto) +
       opt('shadowsocks', 'Shadowsocks', proto) +
       opt('wireguard', 'WireGuard', proto) +
-      opt('hysteria2', 'Hysteria2', proto) +
       opt('mtproto', 'MTProto', proto) +
+      opt('hysteria2', 'Hysteria2', proto) +
       opt('socks', 'SOCKS5', proto) +
       opt('http', 'HTTP Proxy', proto) +
       opt('dokodemo-door', 'Dokodemo-door', proto) +
@@ -620,6 +620,10 @@
 
   function syncInboundForm(form) {
     var f = form.elements;
+    var p = f.protocol.value;
+    if (p === 'wireguard' || p === 'mtproto' || p === 'socks' || p === 'http' || p === 'dokodemo-door') {
+      f.security.value = 'none';
+    }
     if (f.security.value === 'reality') {
       if (f.network.value !== 'tcp' && f.network.value !== 'grpc' && f.network.value !== 'xhttp') f.network.value = 'tcp';
       if (f.protocol.value !== 'vless' && f.protocol.value !== 'trojan') f.security.value = 'none';
