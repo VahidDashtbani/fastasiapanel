@@ -339,7 +339,7 @@ var subStatusTemplate = template.Must(template.New("subStatus").Parse(`<!DOCTYPE
         <input id="subUrlInput" class="url-input" type="text" readonly value="{{.SubURL}}" />
         <button id="copySubBtn" class="primary" type="button">Copy Subscription</button>
         <button id="copyAllBtn" type="button">Copy All Configs</button>
-        <button id="subQrBtn" type="button">Subscription QR</button>
+        <button id="subQrBtn" type="button">Config QR</button>
         <button id="toggleRawBtn" type="button">Raw Output</button>
       </div>
     </div>
@@ -621,7 +621,9 @@ function subBasePrefix() {
       if (subQrBtn) {
         subQrBtn.addEventListener("click", function () {
           var inp = document.getElementById("subUrlInput");
-          openQRModal("Subscription QR", inp ? inp.value : "");
+          var targetVal = (links && links.length > 0) ? links[0] : (inp ? inp.value : "");
+          var targetTitle = (links && links.length > 0) ? extractConfigLabel(links[0], 0) : "Config QR";
+          openQRModal(targetTitle, targetVal);
         });
       }
 

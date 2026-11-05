@@ -364,7 +364,7 @@
         '<td><div class="row-actions">' +
         '<button class="icon-btn" data-act="qr" data-cid="' + esc(c.id) + '" data-id="' + esc(ib.id) + '">QR</button>' +
         '<button class="icon-btn" data-act="copy" data-cid="' + esc(c.id) + '" data-id="' + esc(ib.id) + '">Link</button>' +
-        (c.sub_url ? '<button class="icon-btn" data-act="copy-sub" data-cid="' + esc(c.id) + '" data-id="' + esc(ib.id) + '">Sub</button>' : '') +
+        (c.sub_url ? (resolveClientSubUrl(c) ? '<button class="icon-btn" data-act="copy-sub" data-cid="' + esc(c.id) + '" data-id="' + esc(ib.id) + '">Sub</button>' : '') : '') +
         '<button class="icon-btn" data-act="edit-client" data-cid="' + esc(c.id) + '" data-id="' + esc(ib.id) + '">Edit</button>' +
         '<button class="icon-btn" data-act="reset" data-cid="' + esc(c.id) + '">Reset</button>' +
         '<button class="icon-btn danger" data-act="del-client" data-cid="' + esc(c.id) + '">Delete</button>' +
@@ -1406,6 +1406,37 @@ function renderRouting() {
     }
   }
 
+
+  function resolveClientDirectLink(ib, cl) {
+    if (!cl) return "";
+    if (cl.link && String(cl.link).trim()) return String(cl.link).trim();
+    if (!ib) return "";
+    const host = (window.location && window.location.hostname) ? window.location.hostname : "127.0.0.1";
+    const port = ib.port || 443;
+    const proto = String(ib.protocol || "vless").toLowerCase();
+    const id = cl.uuid || cl.id || "";
+    const label = encodeURIComponent(cl.email || ib.remark || ib.tag || proto);
+    if (!id) return "";
+    if (proto === "trojan") {
+      return "trojan://" + encodeURIComponent(id) + "@" + host + ":" + port + "?security=tls#" + label;
+    }
+    if (proto === "vmess") {
+      const payload = { v: "2", ps: cl.email || ib.tag || "vmess", add: host, port: String(port), id: id, aid: "0", net: "tcp", type: "none", tls: "" };
+      return "vmess://" + btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+    }
+    return "vless://" + encodeURIComponent(id) + "@" + host + ":" + port + "?encryption=none&security=none#" + label;
+  }
+
+  function resolveClientSubUrl(cl) {
+    if (!cl) return "";
+    if (cl.sub_url && String(cl.sub_url).trim()) return String(cl.sub_url).trim();
+    const subId = String(cl.sub_id || cl.subId || "").trim();
+    if (!subId) return "";
+    const origin = window.location ? window.location.origin : "";
+    const prefix = (typeof basePrefix === "function") ? basePrefix() : "";
+    return origin + prefix + "/sub/" + encodeURIComponent(subId);
+  }
+
   function openQRModal(c) {
     var currentLink = c.sub_url || c.link;
     var body = '<div class="qr-tabs">' +
@@ -1606,8 +1637,8 @@ function renderRouting() {
     if (act === 'add-client' && ib) return openClientModal(ib, null);
     if (act === 'edit-client' && ib && cl) return openClientModal(ib, cl);
     if (act === 'qr' && cl) return openQRModal(cl);
-    if (act === 'copy' && cl) return copy(cl.link);
-    if (act === 'copy-sub' && cl && cl.sub_url) return copy(cl.sub_url);
+    if (act === 'copy' && cl) return copy(resolveClientDirectLink(ib, cl));
+    if (act === 'copy-sub' && cl) { const sUrl = resolveClientSubUrl(cl); if (sUrl) return copy(sUrl); }
     if (act === 'copy-tok') return copy(el.dataset.tok);
     if (act === 'reset-inbound' && ib) {
       if (!confirm('Reset traffic for all clients in this inbound?')) return;
