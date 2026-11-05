@@ -1024,30 +1024,58 @@ function renderRouting() {
     var o = ob || {};
     var isEdit = Boolean(o.id);
     var curProto = o.protocol || 'socks';
+    var ext = {};
+    if (o.settings) {
+      if (typeof o.settings === 'string') {
+        try { ext = JSON.parse(o.settings) || {}; } catch (_) { ext = {}; }
+      } else if (typeof o.settings === 'object') {
+        ext = o.settings;
+      }
+    }
     var body = '<div class="grid2">' +
       '<label>Unique Tag<input class="ltr" name="tag" placeholder="warp-out" value="' + esc(o.tag || '') + '" required></label>' +
       '<label>Remark<input name="remark" placeholder="Cloudflare WARP" value="' + esc(o.remark || '') + '"></label>' +
       '<label>Protocol<select name="protocol">' +
       opt('socks', 'SOCKS5', curProto) +
       opt('http', 'HTTP Proxy', curProto) +
-      opt('freedom', 'Freedom', curProto) +
-      opt('blackhole', 'Blackhole', curProto) +
+      opt('vless', 'VLESS', curProto) +
+      opt('vmess', 'VMess', curProto) +
+      opt('trojan', 'Trojan', curProto) +
+      opt('shadowsocks', 'Shadowsocks', curProto) +
+      opt('wireguard', 'WireGuard', curProto) +
+      opt('freedom', 'Freedom (Direct)', curProto) +
+      opt('blackhole', 'Blackhole (Block)', curProto) +
       '</select></label>' +
-      '<label>Server Address<input class="ltr" name="address" placeholder="127.0.0.1" value="' + esc(o.address || '') + '"></label>' +
+      '<label>Server Address / Endpoint<input class="ltr" name="address" placeholder="127.0.0.1 or example.com" value="' + esc(o.address || '') + '"></label>' +
       '<label>Port<input class="ltr" name="port" type="number" placeholder="40000" value="' + esc(o.port || '') + '"></label>' +
-      '<label>Username (Optional)<input class="ltr" name="username" value="' + esc(o.username || '') + '"></label>' +
-      '<label class="span2">Password (Optional)<input class="ltr" name="password" value="' + esc(o.password || '') + '"></label>' +
-      '</div>';
+      '<label>Username / UUID / Key<input class="ltr" name="username" placeholder="Optional / UUID / WG PrivKey" value="' + esc(o.username || '') + '"></label>' +
+      '<label>Password / Method / PeerKey<input class="ltr" name="password" placeholder="Optional / Password / PublicKey" value="' + esc(o.password || '') + '"></label>' +
+      '<label>Security / TLS<select name="ob_sec">' +
+      opt('none', 'None', ext.security || 'none') +
+      opt('tls', 'TLS', ext.security || '') +
+      opt('reality', 'Reality', ext.security || '') +
+      '</select></label>' +
+      '<label>SNI / ServerName / Flow<input class="ltr" name="ob_sni" placeholder="example.com or xtls-rprx-vision" value="' + esc(ext.sni || ext.flow || '') + '"></label>' +
+    '</div>';
     openModal(isEdit ? 'Edit Outbound' : 'New Outbound', body, function (form, setErr) {
       var f = form.elements;
+      var protoVal = f.protocol.value;
+      var secVal = f.ob_sec ? f.ob_sec.value : 'none';
+      var sniOrFlow = f.ob_sni ? f.ob_sni.value.trim() : '';
+      var settingsObj = { security: secVal };
+      if (sniOrFlow) {
+        if (sniOrFlow.indexOf('xtls-') === 0) settingsObj.flow = sniOrFlow;
+        else settingsObj.sni = sniOrFlow;
+      }
       var payload = {
         tag: f.tag.value.trim(),
         remark: f.remark.value.trim(),
-        protocol: f.protocol.value,
+        protocol: protoVal,
         address: f.address.value.trim(),
         port: parseInt(f.port.value, 10) || 0,
         username: f.username.value.trim(),
-        password: f.password.value.trim()
+        password: f.password.value.trim(),
+        settings: settingsObj
       };
       var req = isEdit
         ? api('PUT', 'outbounds/' + encodeURIComponent(o.id), payload)
