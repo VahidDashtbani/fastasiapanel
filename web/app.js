@@ -2588,7 +2588,294 @@ document.addEventListener("DOMContentLoaded", () => {
     return item.link || item.uri || item.config || item.url || item.vless || item.vmess || buildSubUrl(item);
   }
 
-  function renderQrIntoBox(text) {
+
+function fapMakeScannableQR(text, sizePx) {
+  var px = sizePx || 196;
+  var raw = String(text || "");
+  var utf8 = unescape(encodeURIComponent(raw));
+  var bytes = [];
+  for (var i = 0; i < utf8.length; i++) {
+    bytes.push(utf8.charCodeAt(i) & 0xff);
+  }
+
+  // Versions 1..10 (ECC Level M) byte capacity
+  var caps = [0, 14, 26, 42, 62, 84, 106, 122, 152, 180, 213];
+  var totalCodewords = [0, 26, 44, 70, 100, 134, 172, 196, 242, 292, 346];
+  var ecPerBlock = [0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26];
+  var blocksCount = [0, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5];
+
+  var ver = 0;
+  for (var v = 1; v <= 10; v++) {
+    if (bytes.length <= caps[v]) {
+      ver = v;
+      break;
+    }
+  }
+  if (ver === 0) {
+    throw new Error("Payload too long for offline QR v1-v10");
+  }
+
+  var n = ver * 4 + 17;
+  var dataCapacity = totalCodewords[ver] - ecPerBlock[ver] * blocksCount[ver];
+
+  // Bit stream: mode 0100 (byte) + char count (8 or 16 bits) + payload + terminator + pad
+  var bits = [];
+  function pushBits(val, len) {
+    for (var b = len - 1; b >= 0; b--) {
+      bits.push((val >>> b) & 1);
+    }
+  }
+  pushBits(4, 4);
+  pushBits(bytes.length, ver >= 10 ? 16 : 8);
+  for (var i = 0; i < bytes.length; i++) {
+    pushBits(bytes[i], 8);
+  }
+  var maxBits = dataCapacity * 8;
+  var termLen = Math.min(4, Math.max(0, maxBits - bits.length));
+  pushBits(0, termLen);
+  while (bits.length % 8 !== 0) bits.push(0);
+  var padBytes = [0xec, 0x11];
+  var padIdx = 0;
+  while (bits.length < maxBits) {
+    pushBits(padBytes[padIdx % 2], 8);
+    padIdx++;
+  }
+
+  var dataCodewords = [];
+  for (var i = 0; i < dataCapacity; i++) {
+    var cw = 0;
+    for (var b = 0; b < 8; b++) {
+      cw = (cw << 1) | (bits[i * 8 + b] || 0);
+    }
+    dataCodewords.push(cw);
+  }
+
+  // GF(256) Reed-Solomon generator
+  var gfExp = new Array(512);
+  var gfLog = new Array(256);
+  var x = 1;
+  for (var i = 0; i < 255; i++) {
+    gfExp[i] = x;
+    gfLog[x] = i;
+    x <<= 1;
+    if (x & 0x100) x ^= 0x11d;
+  }
+  for (var i = 255; i < 512; i++) gfExp[i] = gfExp[i - 255];
+
+  function gfMul(a, b) {
+    if (a === 0 || b === 0) return 0;
+    return gfExp[(gfLog[a] + gfLog[b]) % 255];
+  }
+
+  function rsGenerator(ecLen) {
+    var poly = [1];
+    for (var i = 0; i < ecLen; i++) {
+      var next = new Array(poly.length + 1).fill(0);
+      var root = gfExp[i];
+      for (var j = 0; j < poly.length; j++) {
+        next[j] ^= poly[j];
+        next[j + 1] ^= gfMul(poly[j], root);
+      }
+      poly = next;
+    }
+    return poly;
+  }
+
+  function rsEncode(msg, ecLen) {
+    var gen = rsGenerator(ecLen);
+    var rem = new Array(ecLen).fill(0);
+    for (var i = 0; i < msg.length; i++) {
+      var factor = msg[i] ^ rem[0];
+      rem.shift();
+      rem.push(0);
+      for (var j = 0; j < ecLen; j++) {
+        rem[j] ^= gfMul(gen[j + 1], factor);
+      }
+    }
+    return rem;
+  }
+
+  var bc = blocksCount[ver];
+  var ecLen = ecPerBlock[ver];
+  var shortLen = Math.floor(dataCapacity / bc);
+  var longCount = dataCapacity % bc;
+  var dataBlocks = [];
+  var ecBlocks = [];
+  var offset = 0;
+  for (var b = 0; b < bc; b++) {
+    var len = shortLen + (b >= bc - longCount ? 1 : 0);
+    var blk = dataCodewords.slice(offset, offset + len);
+    offset += len;
+    dataBlocks.push(blk);
+    ecBlocks.push(rsEncode(blk, ecLen));
+  }
+
+  var interleaved = [];
+  var maxDataLen = shortLen + (longCount > 0 ? 1 : 0);
+  for (var i = 0; i < maxDataLen; i++) {
+    for (var b = 0; b < bc; b++) {
+      if (i < dataBlocks[b].length) interleaved.push(dataBlocks[b][i]);
+    }
+  }
+  for (var i = 0; i < ecLen; i++) {
+    for (var b = 0; b < bc; b++) {
+      interleaved.push(ecBlocks[b][i]);
+    }
+  }
+
+  var finalBits = [];
+  for (var i = 0; i < interleaved.length; i++) {
+    for (var b = 7; b >= 0; b--) {
+      finalBits.push((interleaved[i] >>> b) & 1);
+    }
+  }
+  var remBits = totalCodewords[ver] * 8 - finalBits.length;
+  for (var i = 0; i < remBits; i++) finalBits.push(0);
+
+  // Matrix setup
+  var grid = Array.from({ length: n }, function () { return new Array(n).fill(0); });
+  var reserved = Array.from({ length: n }, function () { return new Array(n).fill(false); });
+
+  function setModule(r, c, dark, isReserved) {
+    if (r < 0 || r >= n || c < 0 || c >= n) return;
+    grid[r][c] = dark ? 1 : 0;
+    if (isReserved) reserved[r][c] = true;
+  }
+
+  function placeFinder(r0, c0) {
+    for (var r = -1; r <= 7; r++) {
+      for (var c = -1; c <= 7; c++) {
+        var rr = r0 + r, cc = c0 + c;
+        if (rr < 0 || rr >= n || cc < 0 || cc >= n) continue;
+        var inBox = r >= 0 && r <= 6 && c >= 0 && c <= 6;
+        var border = r === 0 || r === 6 || c === 0 || c === 6;
+        var center = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+        setModule(rr, cc, inBox && (border || center), true);
+      }
+    }
+  }
+
+  placeFinder(0, 0);
+  placeFinder(0, n - 7);
+  placeFinder(n - 7, 0);
+
+  // Timing patterns
+  for (var i = 8; i < n - 8; i++) {
+    var dark = (i % 2 === 0);
+    setModule(6, i, dark, true);
+    setModule(i, 6, dark, true);
+  }
+
+  // Alignment pattern for v >= 2
+  if (ver >= 2) {
+    var alignPos = [0, 0, 18, 22, 26, 30, 34, 22, 24, 26, 28][ver];
+    if (alignPos > 0) {
+      for (var r = -2; r <= 2; r++) {
+        for (var c = -2; c <= 2; c++) {
+          var rr = alignPos + r, cc = alignPos + c;
+          if (!reserved[rr][cc]) {
+            var isDark = Math.abs(r) === 2 || Math.abs(c) === 2 || (r === 0 && c === 0);
+            setModule(rr, cc, isDark, true);
+          }
+        }
+      }
+    }
+  }
+
+  // Dark module
+  setModule(n - 8, 8, true, true);
+
+  // Reserve format info cells
+  for (var i = 0; i < 9; i++) {
+    if (i < n) {
+      reserved[8][i] = true;
+      reserved[i][8] = true;
+    }
+  }
+  for (var i = 0; i < 8; i++) {
+    reserved[8][n - 1 - i] = true;
+    reserved[n - 1 - i][8] = true;
+  }
+
+  // Zigzag data placement
+  var bitCursor = 0;
+  var upward = true;
+  for (var col = n - 1; col >= 1; col -= 2) {
+    if (col === 6) col = 5;
+    for (var step = 0; step < n; step++) {
+      var r = upward ? (n - 1 - step) : step;
+      for (var dc = 0; dc >= -1; dc--) {
+        var c = col + dc;
+        if (c < 0 || reserved[r][c]) continue;
+        var bit = bitCursor < finalBits.length ? finalBits[bitCursor++] : 0;
+        grid[r][c] = bit;
+      }
+    }
+    upward = !upward;
+  }
+
+  // Mask 0: (r + c) % 2 === 0
+  for (var r = 0; r < n; r++) {
+    for (var c = 0; c < n; c++) {
+      if (!reserved[r][c] && ((r + c) % 2 === 0)) {
+        grid[r][c] ^= 1;
+      }
+    }
+  }
+
+  // Format bits for ECC M (00) + Mask 0 (000) => data 00000
+  var fmtData = 0;
+  var rem = fmtData << 10;
+  var genPoly = 0x537;
+  for (var b = 14; b >= 10; b--) {
+    if ((rem >>> b) & 1) {
+      rem ^= genPoly << (b - 10);
+    }
+  }
+  var fmtBits = (((fmtData << 10) | rem) ^ 0x5412) & 0x7fff;
+
+  function getFmtBit(idx) {
+    return (fmtBits >>> (14 - idx)) & 1;
+  }
+
+  for (var i = 0; i <= 5; i++) grid[8][i] = getFmtBit(i);
+  grid[8][7] = getFmtBit(6);
+  grid[8][8] = getFmtBit(7);
+  grid[7][8] = getFmtBit(8);
+  for (var i = 9; i < 15; i++) grid[14 - i][8] = getFmtBit(i);
+
+  for (var i = 0; i < 8; i++) grid[n - 1 - i][8] = getFmtBit(i);
+  for (var i = 8; i < 15; i++) grid[8][n - 15 + i] = getFmtBit(i);
+
+  var canvas = document.createElement("canvas");
+  canvas.width = px;
+  canvas.height = px;
+  var ctx = canvas.getContext("2d");
+  var quiet = 4;
+  var total = n + quiet * 2;
+  var scale = Math.max(1, Math.floor(px / total));
+  var drawW = scale * total;
+  var padOffset = Math.floor((px - drawW) / 2);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, px, px);
+  ctx.fillStyle = "#0b0f14";
+  for (var r = 0; r < n; r++) {
+    for (var c = 0; c < n; c++) {
+      if (grid[r][c]) {
+        ctx.fillRect(
+          padOffset + (c + quiet) * scale,
+          padOffset + (r + quiet) * scale,
+          scale,
+          scale
+        );
+      }
+    }
+  }
+  return canvas;
+}
+
+  function renderScannableQr(text) {
     const box = document.getElementById("fapQrCanvasBox");
     if (!box) return;
     box.innerHTML = "";
@@ -2597,25 +2884,23 @@ document.addEventListener("DOMContentLoaded", () => {
       box.innerHTML = '<span style="color:#111827;font-size:13px;">No data available</span>';
       return;
     }
-
+    try {
+      const c = fapMakeScannableQR(val, 196);
+      c.style.borderRadius = "8px";
+      box.appendChild(c);
+      return;
+    } catch (_) {}
     if (typeof window.QRCode === "function") {
       try {
         new window.QRCode(box, { text: val, width: 196, height: 196, correctLevel: window.QRCode.CorrectLevel ? window.QRCode.CorrectLevel.M : 0 });
         return;
       } catch (_) {}
     }
+    box.innerHTML = '<div style="color:#111827;font-size:11px;word-break:break-all;padding:8px;">' + val.replace(/</g, "&lt;") + '</div>';
+  }
 
-    // Fallback to public QR image generator if local QRCode lib is absent
-    const img = document.createElement("img");
-    img.alt = "QR Code";
-    img.width = 196;
-    img.height = 196;
-    img.style.borderRadius = "8px";
-    img.src = "https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=" + encodeURIComponent(val);
-    img.onerror = function() {
-      box.innerHTML = '<div style="color:#111827;font-size:11px;word-break:break-all;padding:8px;">' + val.replace(/</g, "&lt;") + '</div>';
-    };
-    box.appendChild(img);
+  function renderQrIntoBox(text) {
+    renderScannableQr(text);
   }
 
   function syncQrTab() {
