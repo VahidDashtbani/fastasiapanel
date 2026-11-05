@@ -836,6 +836,19 @@
         '<div class="table-wrap"><table><thead><tr>' +
           '<th>Status</th><th>Tag</th><th>Protocol</th><th>Endpoint</th><th style="text-align:right">Actions</th>' +
         '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+
+      box.onclick = function (ev) {
+        var btn = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
+        if (!btn) return;
+        var act = btn.getAttribute('data-act');
+        var oid = btn.getAttribute('data-oid') || '';
+        if (act === 'edit-outbound') {
+          ev.preventDefault();
+          ev.stopPropagation();
+          var targetOb = findOutbound(oid);
+          if (targetOb) openOutboundModal(targetOb);
+        }
+      };
     }).catch(function (err) {
       var box = document.getElementById('outbounds-table-box');
       if (box) box.innerHTML = '<div class="empty">Failed to load outbounds: ' + esc(err && err.message ? err.message : err) + '</div>';
