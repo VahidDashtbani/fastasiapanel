@@ -245,6 +245,8 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET "+b+"/static/login.js", a.asset("login.js", "application/javascript; charset=utf-8"))
 	mux.HandleFunc("GET "+b+"/static/style.css", a.asset("style.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET "+b+"/sub/{subId}", a.subscription)
+	mux.HandleFunc("GET "+b+"/sub/qr", a.apiQR)
+	mux.HandleFunc("GET "+b+"/api/qr", req(a.apiQR))
 
 	mux.HandleFunc("POST "+b+"/api/login", a.login)
 	mux.HandleFunc("POST "+b+"/api/logout", req(a.logout))
@@ -454,7 +456,7 @@ func (a *App) apiQR(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing data", http.StatusBadRequest)
 		return
 	}
-	if len(data) > 2048 {
+	if len(data) > 4096 {
 		http.Error(w, "data too long", http.StatusBadRequest)
 		return
 	}

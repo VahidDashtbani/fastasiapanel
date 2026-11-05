@@ -2887,7 +2887,7 @@ function fapMakeScannableQR(text, sizePx) {
       return;
     }
     const prefix = (typeof basePrefix === "function") ? basePrefix() : "";
-    const qrUrl = prefix + "/api/qr?data=" + encodeURIComponent(val);
+    const qrUrl = (prefix ? prefix : "") + "/api/qr?data=" + encodeURIComponent(val);
     const img = document.createElement("img");
     img.alt = "QR Code";
     img.width = px;
