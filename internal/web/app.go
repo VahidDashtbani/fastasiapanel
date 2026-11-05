@@ -1301,10 +1301,7 @@ func probeOutbound(ob store.Outbound) outboundTestResult {
 			}
 		}
 	case "http":
-		reqStr := "CONNECT 1.1.1.1:443 HTTP/1.1
-Host: 1.1.1.1:443
-
-"
+		reqStr := fmt.Sprintf("CONNECT 1.1.1.1:443 HTTP/1.1\r\nHost: 1.1.1.1:443\r\n\r\n")
 		if _, err := conn.Write([]byte(reqStr)); err != nil {
 			res.OK = false
 			res.LatencyMS = time.Since(start).Milliseconds()
