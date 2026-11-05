@@ -440,3 +440,40 @@ tbody tr:hover {
   .main { padding: 16px 14px 36px; }
   .grid2 { grid-template-columns: 1fr; }
 }
+
+/* Outbound Health / Latency Badges */
+.ob-health-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.ob-health-pill.idle {
+  color: var(--muted, #94a3b8);
+  background: rgba(148, 163, 184, 0.1);
+}
+.ob-health-pill.testing {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.14);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+.ob-health-pill.good {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.38);
+}
+.ob-health-pill.warn, .ob-health-pill.slow {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.38);
+}
+.ob-health-pill.bad {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.38);
+}

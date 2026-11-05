@@ -793,16 +793,89 @@
     }
   }
 
+  state.outboundHealth = state.outboundHealth || {};
+
+  function formatOutboundHealthBadge(oid) {
+    var h = (state.outboundHealth || {})[oid];
+    if (!h) return '<span class="ob-health-pill idle">Not tested</span>';
+    if (h.testing) return '<span class="ob-health-pill testing">Testing...</span>';
+    if (h.ok) {
+      var cls = h.latency_ms <= 120 ? 'good' : (h.latency_ms <= 350 ? 'warn' : 'slow');
+      var msText = h.latency_ms > 0 ? (h.latency_ms + ' ms') : (h.status || 'OK');
+      return '<span class="ob-health-pill ' + cls + '" title="' + esc(h.status || 'Healthy') + '">' + esc(msText) + '</span>';
+    }
+    return '<span class="ob-health-pill bad" title="' + esc(h.error || h.status || 'Unreachable') + '">' + esc(h.status || 'Failed') + '</span>';
+  }
+
+  function runOutboundTest(oid) {
+    if (!oid) return Promise.resolve();
+    state.outboundHealth[oid] = { testing: true };
+    var cell = document.querySelector('[data-ob-health="' + oid + '"]');
+    if (cell) cell.innerHTML = formatOutboundHealthBadge(oid);
+
+    return api('POST', 'outbounds/' + encodeURIComponent(oid) + '/test').then(function (res) {
+      state.outboundHealth[oid] = res || { ok: false, status: 'Error' };
+      var c = document.querySelector('[data-ob-health="' + oid + '"]');
+      if (c) c.innerHTML = formatOutboundHealthBadge(oid);
+      if (res && res.ok) {
+        toast((res.tag || 'Outbound') + ': ' + (res.latency_ms > 0 ? res.latency_ms + ' ms' : res.status));
+      } else {
+        toast((res && res.tag ? res.tag + ': ' : '') + ((res && (res.error || res.status)) || 'Unreachable'), true);
+      }
+    }).catch(function (err) {
+      state.outboundHealth[oid] = { ok: false, status: 'Error', error: err && err.message ? err.message : String(err) };
+      var c = document.querySelector('[data-ob-health="' + oid + '"]');
+      if (c) c.innerHTML = formatOutboundHealthBadge(oid);
+      toast('Test failed: ' + (err && err.message ? err.message : err), true);
+    });
+  }
+
+  function runAllOutboundsTest() {
+    var list = state.outbounds || [];
+    if (!list.length) {
+      toast('No outbounds to test');
+      return;
+    }
+    list.forEach(function (o) {
+      var oid = o.id || o.tag || '';
+      if (oid) {
+        state.outboundHealth[oid] = { testing: true };
+        var cell = document.querySelector('[data-ob-health="' + oid + '"]');
+        if (cell) cell.innerHTML = formatOutboundHealthBadge(oid);
+      }
+    });
+    api('POST', 'outbounds/test-all').then(function (results) {
+      var okCount = 0;
+      (results || []).forEach(function (r) {
+        var key = r.id || r.tag || '';
+        if (key) {
+          state.outboundHealth[key] = r;
+          var cell = document.querySelector('[data-ob-health="' + key + '"]');
+          if (cell) cell.innerHTML = formatOutboundHealthBadge(key);
+        }
+        if (r.ok) okCount++;
+      });
+      toast('Tested ' + (results ? results.length : 0) + ' outbounds (' + okCount + ' healthy)');
+    }).catch(function (err) {
+      toast('Bulk test failed: ' + (err && err.message ? err.message : err), true);
+    });
+  }
+
   function renderOutbounds() {
-    var root = document.getElementById('view') || document.getElementById('page') || document.querySelector('main');
-    if (!root) return;
-    root.innerHTML =
+    topActions.innerHTML =
+      '<div class="top-tools">' +
+        '<button class="btn" id="btn-test-all-ob">Test All</button>' +
+        '<button class="btn primary" id="btn-new-ob">+ Add Outbound</button>' +
+      '</div>';
+    var btnNew = document.getElementById('btn-new-ob');
+    if (btnNew) btnNew.onclick = function () { openOutboundModal(); };
+    var btnTestAll = document.getElementById('btn-test-all-ob');
+    if (btnTestAll) btnTestAll.onclick = function () { runAllOutboundsTest(); };
+
+    view.innerHTML =
       '<div class="card">' +
-        '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">' +
-          '<div><h3 style="margin:0">Outbounds</h3><div class="hint">Manage outbound proxies, relay chains &amp; upstream protocols independently</div></div>' +
-          '<div style="display:flex;gap:8px">' +
-            '<button class="btn pri" data-act="new-outbound">+ New Outbound</button>' +
-          '</div>' +
+        '<div class="card-head">' +
+          '<div><h3>Outbounds</h3><div class="hint">Manage external proxy gateways (WARP, SOCKS5, HTTP, Freedom, Blackhole) and probe live latency.</div></div>' +
         '</div>' +
         '<div id="outbounds-table-box"><div class="hint">Loading outbounds...</div></div>' +
       '</div>';
@@ -816,7 +889,8 @@
         return;
       }
       var rows = state.outbounds.map(function (o) {
-        var oid = esc(o.id || o.tag || '');
+        var rawId = o.id || o.tag || '';
+        var oid = esc(rawId);
         var tag = esc(o.tag || '-');
         var remark = o.remark ? '<div class="hint" style="font-size:12px">' + esc(o.remark) + '</div>' : '';
         var proto = esc((o.protocol || o.type || '-').toUpperCase());
@@ -827,14 +901,19 @@
             '<td><span class="tag">' + tag + '</span>' + remark + '</td>' +
             '<td>' + proto + '</td>' +
             '<td class="ltr">' + (endpoint || '-') + '</td>' +
-            '<td style="text-align:right;white-space:nowrap"><button class="icon-btn" data-act="edit-outbound" data-oid="' + oid + '">Edit</button> <button class="icon-btn danger" data-act="del-outbound" data-oid="' + oid + '">Delete</button></td>' +
+            '<td data-ob-health="' + oid + '">' + formatOutboundHealthBadge(rawId) + '</td>' +
+            '<td style="text-align:right;white-space:nowrap">' +
+              '<button class="icon-btn" data-act="test-outbound" data-oid="' + oid + '">Test</button> ' +
+              '<button class="icon-btn" data-act="edit-outbound" data-oid="' + oid + '">Edit</button> ' +
+              '<button class="icon-btn danger" data-act="del-outbound" data-oid="' + oid + '">Delete</button>' +
+            '</td>' +
           '</tr>'
         );
       }).join('');
 
       box.innerHTML =
         '<div class="table-wrap"><table><thead><tr>' +
-          '<th>Status</th><th>Tag</th><th>Protocol</th><th>Endpoint</th><th style="text-align:right">Actions</th>' +
+          '<th>Status</th><th>Tag</th><th>Protocol</th><th>Endpoint</th><th>Health / Latency</th><th style="text-align:right">Actions</th>' +
         '</tr></thead><tbody>' + rows + '</tbody></table></div>';
 
       box.onclick = function (ev) {
@@ -842,7 +921,11 @@
         if (!btn) return;
         var act = btn.getAttribute('data-act');
         var oid = btn.getAttribute('data-oid') || '';
-        if (act === 'edit-outbound') {
+        if (act === 'test-outbound') {
+          ev.preventDefault();
+          ev.stopPropagation();
+          runOutboundTest(oid);
+        } else if (act === 'edit-outbound') {
           ev.preventDefault();
           ev.stopPropagation();
           var targetOb = findOutbound(oid);
