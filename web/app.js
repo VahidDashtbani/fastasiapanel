@@ -235,14 +235,27 @@
           : '<span class="tag danger">Stopped</span>';
 
         view.innerHTML =
-          '<div class="card pad" style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">' +
-          '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+          '<div class="dash-banner">' +
+          '<div class="dash-banner-left">' +
+          '<div>' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
           '<span class="dot ' + (s.xray_running ? 'ok' : '') + '"></span>' +
-          '<b>Xray Core Live Monitor</b>' +
+          '<strong style="font-size:15.5px">Xray Core Command Center</strong>' +
           coreBadge +
-          '<span class="muted">Version: ' + esc(s.xray_version || '-') + ' · CPU: ' + ((sys.cpu || 0).toFixed(1)) + '% · RAM: ' + memPct.toFixed(1) + '%</span>' +
           '</div>' +
-          '<div class="muted" style="font-size:12px">Auto-refresh: every 3s</div>' +
+          '<div class="dash-banner-meta" style="margin-top:6px">' +
+          '<span class="dash-pill num">Core: ' + esc(s.xray_version || '-') + '</span>' +
+          '<span class="dash-pill num">CPU: ' + ((sys.cpu || 0).toFixed(1)) + '%</span>' +
+          '<span class="dash-pill num">RAM: ' + memPct.toFixed(1) + '%</span>' +
+          '<span class="dash-pill num">Uptime: ' + fmtUptime(s.uptime) + '</span>' +
+          '</div>' +
+          '</div>' +
+          '</div>' +
+          '<div class="dash-quick">' +
+          '<button type="button" class="btn sec sm" data-go="clients">Clients (' + s.clients + ')</button>' +
+          '<button type="button" class="btn sec sm" data-go="inbounds">Inbounds (' + s.inbounds + ')</button>' +
+          '<button type="button" class="btn sec sm" data-go="logs">Live Logs</button>' +
+          '</div>' +
           '</div>' +
           '<div class="gauges">' +
           gaugeCard('CPU Usage', sys.cpu || 0, (sys.cpu || 0).toFixed(1) + '%', (sys.cpu_cores || 1) + ' Cores · Load: ' + esc(sys.loads || '-')) +
@@ -257,6 +270,11 @@
           statCard('Total Client Traffic', '<span class="num">' + fmtBytes(s.up + s.down) + '</span>', '↑ ' + fmtBytes(s.up) + ' · ↓ ' + fmtBytes(s.down)) +
           statCard('Panel Uptime', fmtUptime(s.uptime), 'DB: ' + esc(s.db_type) + ' · v' + esc(s.version)) +
           '</div>';
+        view.querySelectorAll('[data-go]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            if (typeof go === 'function') go(btn.dataset.go);
+          });
+        });
         applyBars();
       }).catch(fail);
     }

@@ -369,3 +369,74 @@ tbody tr:hover {
   color: #7dd3fc !important;
 }
 .fap-separated-section { display: none; }
+
+/* Modern Dashboard Command Center & Polish */
+.dash-banner {
+  background: linear-gradient(135deg, rgba(16, 185, 129, .08), rgba(37, 99, 235, .08));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  box-shadow: var(--shadow);
+}
+.dash-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.dash-banner-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.dash-pill {
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-size: 12px;
+  color: var(--text);
+}
+.dash-quick {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.card {
+  transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+.card:hover {
+  border-color: rgba(59, 130, 246, .45);
+}
+.gauge-card {
+  position: relative;
+  overflow: hidden;
+}
+.gauge-card::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: .35;
+}
+.stat b {
+  letter-spacing: -0.02em;
+}
+.table-wrap {
+  overflow-x: auto;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+}
+@media (max-width: 720px) {
+  .main { padding: 16px 14px 36px; }
+  .grid2 { grid-template-columns: 1fr; }
+}
