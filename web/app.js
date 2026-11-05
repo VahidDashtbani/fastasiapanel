@@ -307,7 +307,7 @@
           '</div>' +
           '</div>' +
           renderTrafficChartSvg() +
-          '</div>';align-items:center;gap:8px;flex-wrap:wrap">' +;align-items:center;gap:8px;flex-wrap:wrap">' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
           '<span class="dot ' + (s.xray_running ? 'ok' : '') + '"></span>' +
           '<strong style="font-size:15.5px">Xray Core Command Center</strong>' +
           coreBadge +
