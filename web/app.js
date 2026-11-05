@@ -545,6 +545,9 @@
       opt('wireguard', 'WireGuard', proto) +
       opt('hysteria2', 'Hysteria2', proto) +
       opt('mtproto', 'MTProto', proto) +
+      opt('socks', 'SOCKS5', proto) +
+      opt('http', 'HTTP Proxy', proto) +
+      opt('dokodemo-door', 'Dokodemo-door', proto) +
       '</select></label>' +
       '<label>Port<input class="ltr" name="port" type="number" min="1" max="65535" value="' + (ib ? ib.port : '') + '" required></label>' +
       '<label>Listen IP<input class="ltr" name="listen" placeholder="0.0.0.0" value="' + esc(ib ? ib.listen : '') + '"></label>' +
@@ -559,6 +562,8 @@
       '<label class="span2" data-when="protocol=wireguard">Server Private Key<input class="ltr" name="wg_priv" value="' + esc(o.wg_private_key || '') + '"></label>' +
       '<label class="span2" data-when="protocol=hysteria2">Auth Password<input class="ltr" name="hy_auth" value="' + esc(o.hysteria_auth || '') + '"></label>' +
       '<label class="span2" data-when="protocol=mtproto">Proxy Secret<input class="ltr" name="mt_secret" value="' + esc(o.mtproto_secret || '') + '"></label>' +
+      '<label data-when="protocol=dokodemo-door">Target Address<input class="ltr" name="doko_addr" placeholder="127.0.0.1 or 1.1.1.1" value="' + esc(o.doko_address || '') + '"></label>' +
+      '<label data-when="protocol=dokodemo-door">Target Port<input class="ltr" name="doko_port" type="number" placeholder="53" value="' + esc(o.doko_port || '') + '"></label>' +
 
       '<div class="sec-sep">Transport & Security</div>' +
       '<label>Network<select name="network">' +
@@ -641,6 +646,8 @@
     return {
       remark: f.remark.value.trim(),
       protocol: f.protocol.value,
+      doko_address: f.doko_addr ? f.doko_addr.value.trim() : '',
+      doko_port: f.doko_port ? (parseInt(f.doko_port.value, 10) || 0) : 0,
       port: parseInt(f.port.value, 10),
       listen: f.listen.value.trim(),
       enable: f.enable.checked,
