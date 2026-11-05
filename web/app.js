@@ -297,7 +297,17 @@
           '<div class="dash-banner">' +
           '<div class="dash-banner-left">' +
           '<div>' +
-          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+          '<div style="display:flex +
+          '<div class="card traffic-chart-card" style="margin-top:14px">' +
+          '<div class="traffic-head">' +
+          '<div><strong>Live Bandwidth Throughput Chart</strong><div class="muted" style="font-size:12px">Samples: ' + trafficHistory.length + ' · Download & Upload</div></div>' +
+          '<div class="traffic-legend num">' +
+          '<span><i class="lg-dot down"></i>Download: ' + esc(fmtBytes(sys.net_down_speed || 0)) + '/s</span>' +
+          '<span><i class="lg-dot up"></i>Upload: ' + esc(fmtBytes(sys.net_up_speed || 0)) + '/s</span>' +
+          '</div>' +
+          '</div>' +
+          renderTrafficChartSvg() +
+          '</div>';align-items:center;gap:8px;flex-wrap:wrap">' +
           '<span class="dot ' + (s.xray_running ? 'ok' : '') + '"></span>' +
           '<strong style="font-size:15.5px">Xray Core Command Center</strong>' +
           coreBadge +
