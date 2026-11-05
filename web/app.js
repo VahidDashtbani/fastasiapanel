@@ -599,11 +599,10 @@
     var f = form.elements;
     if (f.security.value === 'reality') {
       if (f.network.value !== 'tcp' && f.network.value !== 'grpc' && f.network.value !== 'xhttp') f.network.value = 'tcp';
-      if (f.protocol.value !== 'vless') f.security.value = 'none';
+      if (f.protocol.value !== 'vless' && f.protocol.value !== 'trojan') f.security.value = 'none';
     }
     if (f.protocol.value === 'shadowsocks') {
       f.security.value = 'none';
-      f.network.value = 'tcp';
     }
     form.querySelectorAll('[data-when]').forEach(function (el) {
       var parts = el.dataset.when.split('=');
@@ -810,7 +809,7 @@
             '<td><span class="tag">' + tag + '</span>' + remark + '</td>' +
             '<td>' + proto + '</td>' +
             '<td class="ltr">' + (endpoint || '-') + '</td>' +
-            '<td style="text-align:right"><button class="icon-btn danger" data-act="del-outbound" data-oid="' + oid + '">Delete</button></td>' +
+            '<td style="text-align:right;white-space:nowrap"><button class="icon-btn" data-act="edit-outbound" data-oid="' + oid + '">Edit</button> <button class="icon-btn danger" data-act="del-outbound" data-oid="' + oid + '">Delete</button></td>' +
           '</tr>'
         );
       }).join('');
@@ -903,7 +902,12 @@ function renderRouting() {
     }).catch(fail);
   }
 
-  function openOutboundModal() {
+  function findOutbound(id) {
+    return (state.outbounds || []).filter(function (o) { return o.id === id || o.tag === id; })[0];
+  }
+
+  function openOutboundModal(ob) {
+    ob = ob || null;
     var body = '<div class="grid2">' +
       '<label>Unique Tag<input class="ltr" name="tag" placeholder="warp-out" required></label>' +
       '<label>Remark<input name="remark" placeholder="Cloudflare WARP"></label>' +

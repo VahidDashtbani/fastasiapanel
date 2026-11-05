@@ -1145,6 +1145,42 @@ func (a *App) createOutbound(w http.ResponseWriter, r *http.Request) {
 	a.finish(w, err, map[string]string{"id": id})
 }
 
+func (a *App) updateOutbound(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req store.Outbound
+	if !decode(w, r, &req) {
+		return
+	}
+	req.Tag = strings.TrimSpace(req.Tag)
+	req.Remark = strings.TrimSpace(req.Remark)
+	req.Protocol = strings.TrimSpace(req.Protocol)
+	if req.Tag == "" || req.Protocol == "" {
+		fail(w, http.StatusBadRequest, "tag and protocol are required")
+		return
+	}
+	if req.Tag == "direct" || req.Tag == "blocked" || req.Tag == "api" {
+		fail(w, http.StatusBadRequest, "reserved outbound tag")
+		return
+	}
+	err := a.st.Update(func(s *store.State) error {
+		for _, o := range s.Outbounds {
+			if o.ID != id && o.Tag == req.Tag {
+				return errors.New("outbound tag already exists")
+			}
+		}
+		for i := range s.Outbounds {
+			if s.Outbounds[i].ID == id {
+				req.ID = id
+				req.Enable = s.Outbounds[i].Enable
+				s.Outbounds[i] = req
+				return nil
+			}
+		}
+		return errNotFound
+	})
+	a.finish(w, err, map[string]bool{"ok": true})
+}
+
 func (a *App) toggleOutbound(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	err := a.st.Update(func(s *store.State) error {
