@@ -387,7 +387,57 @@ func (a *App) subscription(w http.ResponseWriter, r *http.Request) {
 		}
 		subURL := fmt.Sprintf("%s://%s%s", scheme, r.Host, r.URL.Path)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(renderSubStatusPage(subID, res.Title, res.Upload, res.Download, res.Total, res.ExpireSec, res.Content, subURL)))
+		usedBytes := res.Upload + res.Download
+		statusLabel := "Active"
+		statusTone := ""
+		progressPct := 0
+		totalText := "Unlimited"
+		remainText := "Unlimited"
+		if res.Total > 0 {
+			totalText = formatBytesEN(res.Total)
+			rem := res.Total - usedBytes
+			if rem < 0 {
+				rem = 0
+			}
+			remainText = formatBytesEN(rem)
+			pct := int((float64(usedBytes) / float64(res.Total)) * 100.0)
+			if pct < 0 {
+				pct = 0
+			} else if pct > 100 {
+				pct = 100
+			}
+			progressPct = pct
+			if rem == 0 {
+				statusLabel = "Quota Exceeded"
+				statusTone = "danger"
+			} else if pct >= 85 {
+				statusTone = "warn"
+			}
+		}
+		expireText := "Never"
+		if res.ExpireSec > 0 {
+			expireText = time.Unix(res.ExpireSec, 0).UTC().Format("2006-01-02 15:04 UTC")
+		}
+		emailTitle := strings.TrimSpace(res.Title)
+		if emailTitle == "" {
+			emailTitle = subID
+		}
+		pageData := subStatusPageData{
+			ClientEmail:  emailTitle,
+			SubID:        subID,
+			SubURL:       subURL,
+			StatusLabel:  statusLabel,
+			StatusTone:   statusTone,
+			UsedText:     formatBytesEN(usedBytes),
+			TotalText:    totalText,
+			RemainText:   remainText,
+			ExpireText:   expireText,
+			UploadText:   formatBytesEN(res.Upload),
+			DownloadText: formatBytesEN(res.Download),
+			ProgressPct:  progressPct,
+			RawPayload:   res.Content,
+		}
+		renderSubStatusPage(w, r, pageData)
 		return
 	}
 
