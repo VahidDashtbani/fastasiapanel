@@ -2875,28 +2875,46 @@ function fapMakeScannableQR(text, sizePx) {
   return canvas;
 }
 
-  function renderScannableQr(text) {
-    const box = document.getElementById("fapQrCanvasBox");
+  
+  function renderUnifiedServerQR(boxId, text, sizePx) {
+    const box = document.getElementById(boxId || "fapQrCanvasBox");
     if (!box) return;
     box.innerHTML = "";
-    const val = (text || "").trim();
+    const val = String(text || "").trim();
+    const px = sizePx || 210;
     if (!val) {
       box.innerHTML = '<span style="color:#111827;font-size:13px;">No data available</span>';
       return;
     }
-    try {
-      const c = fapMakeScannableQR(val, 196);
-      c.style.borderRadius = "8px";
-      box.appendChild(c);
-      return;
-    } catch (_) {}
-    if (typeof window.QRCode === "function") {
-      try {
-        new window.QRCode(box, { text: val, width: 196, height: 196, correctLevel: window.QRCode.CorrectLevel ? window.QRCode.CorrectLevel.M : 0 });
-        return;
-      } catch (_) {}
-    }
-    box.innerHTML = '<div style="color:#111827;font-size:11px;word-break:break-all;padding:8px;">' + val.replace(/</g, "&lt;") + '</div>';
+    const prefix = (typeof basePrefix === "function") ? basePrefix() : "";
+    const qrUrl = prefix + "/api/qr?data=" + encodeURIComponent(val);
+    const img = document.createElement("img");
+    img.alt = "QR Code";
+    img.width = px;
+    img.height = px;
+    img.style.width = px + "px";
+    img.style.height = px + "px";
+    img.style.background = "#ffffff";
+    img.style.padding = "6px";
+    img.style.borderRadius = "10px";
+    img.style.display = "block";
+    img.style.margin = "0 auto";
+    img.src = qrUrl;
+    img.onerror = function () {
+      if (typeof window.QRCode === "function") {
+        box.innerHTML = "";
+        try {
+          new window.QRCode(box, { text: val, width: px, height: px, correctLevel: window.QRCode.CorrectLevel ? window.QRCode.CorrectLevel.L : 1 });
+          return;
+        } catch (_) {}
+      }
+      box.innerHTML = '<div style="color:#111827;font-size:11px;word-break:break-all;padding:8px;">QR render failed</div>';
+    };
+    box.appendChild(img);
+  }
+
+  function renderScannableQr(text) {
+    renderUnifiedServerQR("fapQrCanvasBox", text, 210);
   }
 
   function renderQrIntoBox(text) {
@@ -3372,19 +3390,7 @@ function fapMakeScannableQR(text, sizePx) {
   }
 
   function renderScannableQr(text) {
-    const box = document.getElementById("fapQrCanvasBox");
-    if (!box) return;
-    const val = (text || "").trim();
-    if (!val) {
-      box.innerHTML = '<span style="color:#0f172a;font-size:12px;">No link available</span>';
-      return;
-    }
-    const svg = QRGen.toSvg(val, 196);
-    if (svg) {
-      box.innerHTML = svg;
-    } else {
-      box.innerHTML = `<div style="color:#0f172a;font-size:11px;word-break:break-all;padding:6px;text-align:center;">${val.replace(/</g, "&lt;")}</div>`;
-    }
+    renderUnifiedServerQR("fapQrCanvasBox", text, 210);
   }
 
   function refreshQrModalState() {
