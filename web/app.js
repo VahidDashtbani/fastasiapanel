@@ -288,6 +288,7 @@
         var diskPct = sys.disk_total ? (sys.disk_used * 100 / sys.disk_total) : 0;
         var netSpd = '↑ ' + fmtBytes(sys.net_up_speed || 0) + '/s · ↓ ' + fmtBytes(sys.net_down_speed || 0) + '/s';
         var netTot = 'Total: ↑ ' + fmtBytes(sys.net_up || 0) + ' · ↓ ' + fmtBytes(sys.net_down || 0);
+        pushTrafficSample(sys.net_up_speed || 0, sys.net_down_speed || 0);
         var coreBadge = s.xray_running
           ? '<span class="tag ok">Live · Running</span>'
           : '<span class="tag danger">Stopped</span>';
