@@ -2407,12 +2407,47 @@ function fapOpenInboundJsonModal(mode, initialJson) {
   }
 }
 
-function fapExportInboundsJSON() {
-  var inbounds = (typeof state !== 'undefined' && Array.isArray(state.inbounds)) ? state.inbounds : [];
+async function fapExportInboundsJSON() {
+  var inbounds = [];
+  if (typeof state !== 'undefined' && state && Array.isArray(state.inbounds) && state.inbounds.length) {
+    inbounds = state.inbounds.slice();
+  } else if (typeof window !== 'undefined' && window.state && Array.isArray(window.state.inbounds) && window.state.inbounds.length) {
+    inbounds = window.state.inbounds.slice();
+  }
+
+  if (!inbounds.length) {
+    try {
+      var res = await fapCallAPI('GET', 'inbounds');
+      if (Array.isArray(res)) {
+        inbounds = res;
+      } else if (res && Array.isArray(res.inbounds)) {
+        inbounds = res.inbounds;
+      } else if (res && Array.isArray(res.data)) {
+        inbounds = res.data;
+      }
+      if (typeof state !== 'undefined' && state && Array.isArray(inbounds)) {
+        state.inbounds = inbounds;
+      }
+    } catch (_) {}
+  }
+
+  var enriched = await Promise.all((inbounds || []).map(async function (ib) {
+    var copy = Object.assign({}, ib);
+    var ibId = copy.id || copy.inbound_id || '';
+    if (!Array.isArray(copy.clients) && ibId) {
+      try {
+        var cRes = await fapCallAPI('GET', 'inbounds/' + encodeURIComponent(ibId) + '/clients');
+        if (Array.isArray(cRes)) copy.clients = cRes;
+        else if (cRes && Array.isArray(cRes.clients)) copy.clients = cRes.clients;
+      } catch (_) {}
+    }
+    return copy;
+  }));
+
   return JSON.stringify({
-    version: '1.1.3',
+    version: '1.1.8',
     exported_at: new Date().toISOString(),
-    inbounds: inbounds
+    inbounds: enriched
   }, null, 2);
 }
 
@@ -2552,8 +2587,9 @@ function fapSyncInboundsToolbar() {
     mainEl.prepend(bar);
   }
 
-  document.getElementById('fapInboundPageExportBtn').onclick = function () {
-    fapOpenInboundJsonModal('export', fapExportInboundsJSON());
+  document.getElementById('fapInboundPageExportBtn').onclick = async function () {
+    var jsonText = await fapExportInboundsJSON();
+    fapOpenInboundJsonModal('export', jsonText);
   };
   document.getElementById('fapInboundPageImportBtn').onclick = function () {
     fapOpenInboundJsonModal('import', '');
