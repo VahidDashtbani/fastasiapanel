@@ -273,6 +273,8 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET "+b+"/api/outbounds", req(a.listOutbounds))
 	mux.HandleFunc("POST "+b+"/api/outbounds", req(a.createOutbound))
 	mux.HandleFunc("POST "+b+"/api/outbounds/{id}/toggle", req(a.toggleOutbound))
+	mux.HandleFunc("POST "+b+"/api/outbounds/{id}/test", req(a.testOutbound))
+	mux.HandleFunc("POST "+b+"/api/outbounds/test-all", req(a.testAllOutbounds))
 	mux.HandleFunc("DELETE "+b+"/api/outbounds/{id}", req(a.deleteOutbound))
 
 	mux.HandleFunc("GET "+b+"/api/routing", req(a.listRouting))
@@ -1193,6 +1195,166 @@ func (a *App) toggleOutbound(w http.ResponseWriter, r *http.Request) {
 		return errNotFound
 	})
 	a.finish(w, err, map[string]bool{"ok": true})
+}
+
+type outboundTestResult struct {
+	ID        string `json:"id"`
+	Tag       string `json:"tag"`
+	OK        bool   `json:"ok"`
+	LatencyMS int64  `json:"latency_ms"`
+	Status    string `json:"status"`
+	Error     string `json:"error,omitempty"`
+}
+
+func probeOutbound(ob store.Outbound) outboundTestResult {
+	res := outboundTestResult{
+		ID:  ob.ID,
+		Tag: ob.Tag,
+	}
+	proto := strings.ToLower(strings.TrimSpace(ob.Protocol))
+	if proto == "freedom" || proto == "blackhole" {
+		res.OK = true
+		res.LatencyMS = 0
+		res.Status = "Built-in (" + proto + ")"
+		return res
+	}
+	addr := strings.TrimSpace(ob.Address)
+	if addr == "" || ob.Port <= 0 {
+		res.OK = false
+		res.Status = "Invalid Endpoint"
+		res.Error = "address or port is empty"
+		return res
+	}
+	target := net.JoinHostPort(addr, fmt.Sprintf("%d", ob.Port))
+	start := time.Now()
+	conn, err := net.DialTimeout("tcp", target, 4*time.Second)
+	if err != nil {
+		res.OK = false
+		res.LatencyMS = time.Since(start).Milliseconds()
+		res.Status = "Unreachable"
+		res.Error = err.Error()
+		return res
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(4 * time.Second))
+
+	switch proto {
+	case "socks", "socks5":
+		var greet []byte
+		if ob.Username != "" || ob.Password != "" {
+			greet = []byte{0x05, 0x02, 0x00, 0x02}
+		} else {
+			greet = []byte{0x05, 0x01, 0x00}
+		}
+		if _, err := conn.Write(greet); err != nil {
+			res.OK = false
+			res.LatencyMS = time.Since(start).Milliseconds()
+			res.Status = "Handshake Failed"
+			res.Error = err.Error()
+			return res
+		}
+		resp := make([]byte, 2)
+		if _, err := conn.Read(resp); err != nil || resp[0] != 0x05 || resp[1] == 0xff {
+			res.OK = false
+			res.LatencyMS = time.Since(start).Milliseconds()
+			res.Status = "SOCKS5 Rejected"
+			if err != nil {
+				res.Error = err.Error()
+			} else {
+				res.Error = "no acceptable auth method"
+			}
+			return res
+		}
+		if resp[1] == 0x02 {
+			u := []byte(ob.Username)
+			p := []byte(ob.Password)
+			if len(u) > 255 || len(p) > 255 {
+				res.OK = false
+				res.LatencyMS = time.Since(start).Milliseconds()
+				res.Status = "Auth Error"
+				res.Error = "credentials too long"
+				return res
+			}
+			auth := make([]byte, 0, 3+len(u)+len(p))
+			auth = append(auth, 0x01, byte(len(u)))
+			auth = append(auth, u...)
+			auth = append(auth, byte(len(p)))
+			auth = append(auth, p...)
+			if _, err := conn.Write(auth); err != nil {
+				res.OK = false
+				res.LatencyMS = time.Since(start).Milliseconds()
+				res.Status = "Auth Write Failed"
+				res.Error = err.Error()
+				return res
+			}
+			aresp := make([]byte, 2)
+			if _, err := conn.Read(aresp); err != nil || aresp[1] != 0x00 {
+				res.OK = false
+				res.LatencyMS = time.Since(start).Milliseconds()
+				res.Status = "Auth Failed"
+				if err != nil {
+					res.Error = err.Error()
+				} else {
+					res.Error = "invalid username/password"
+				}
+				return res
+			}
+		}
+	case "http":
+		reqStr := "CONNECT 1.1.1.1:443 HTTP/1.1
+Host: 1.1.1.1:443
+
+"
+		if _, err := conn.Write([]byte(reqStr)); err != nil {
+			res.OK = false
+			res.LatencyMS = time.Since(start).Milliseconds()
+			res.Status = "HTTP Write Failed"
+			res.Error = err.Error()
+			return res
+		}
+		buf := make([]byte, 64)
+		n, err := conn.Read(buf)
+		if err != nil || n == 0 || (!strings.Contains(string(buf[:n]), "200") && !strings.Contains(string(buf[:n]), "407")) {
+			res.OK = false
+			res.LatencyMS = time.Since(start).Milliseconds()
+			res.Status = "HTTP Proxy Error"
+			if err != nil {
+				res.Error = err.Error()
+			} else {
+				res.Error = strings.TrimSpace(string(buf[:n]))
+			}
+			return res
+		}
+	}
+
+	res.OK = true
+	res.LatencyMS = time.Since(start).Milliseconds()
+	if res.LatencyMS < 1 {
+		res.LatencyMS = 1
+	}
+	res.Status = "Healthy"
+	return res
+}
+
+func (a *App) testOutbound(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	snap := a.st.Snapshot()
+	for _, ob := range snap.Outbounds {
+		if ob.ID == id || ob.Tag == id {
+			reply(w, http.StatusOK, probeOutbound(ob))
+			return
+		}
+	}
+	fail(w, http.StatusNotFound, "outbound not found")
+}
+
+func (a *App) testAllOutbounds(w http.ResponseWriter, r *http.Request) {
+	snap := a.st.Snapshot()
+	results := make([]outboundTestResult, len(snap.Outbounds))
+	for i, ob := range snap.Outbounds {
+		results[i] = probeOutbound(ob)
+	}
+	reply(w, http.StatusOK, results)
 }
 
 func (a *App) deleteOutbound(w http.ResponseWriter, r *http.Request) {
