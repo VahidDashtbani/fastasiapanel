@@ -925,24 +925,26 @@ function renderRouting() {
   }
 
   function openOutboundModal(ob) {
-    ob = ob || null;
+    var o = ob || {};
+    var isEdit = Boolean(o.id);
+    var curProto = o.protocol || 'socks';
     var body = '<div class="grid2">' +
-      '<label>Unique Tag<input class="ltr" name="tag" placeholder="warp-out" required></label>' +
-      '<label>Remark<input name="remark" placeholder="Cloudflare WARP"></label>' +
+      '<label>Unique Tag<input class="ltr" name="tag" placeholder="warp-out" value="' + esc(o.tag || '') + '" required></label>' +
+      '<label>Remark<input name="remark" placeholder="Cloudflare WARP" value="' + esc(o.remark || '') + '"></label>' +
       '<label>Protocol<select name="protocol">' +
-      opt('socks', 'SOCKS5', 'socks') +
-      opt('http', 'HTTP Proxy', '') +
-      opt('freedom', 'Freedom', '') +
-      opt('blackhole', 'Blackhole', '') +
+      opt('socks', 'SOCKS5', curProto) +
+      opt('http', 'HTTP Proxy', curProto) +
+      opt('freedom', 'Freedom', curProto) +
+      opt('blackhole', 'Blackhole', curProto) +
       '</select></label>' +
-      '<label>Server Address<input class="ltr" name="address" placeholder="127.0.0.1"></label>' +
-      '<label>Port<input class="ltr" name="port" type="number" placeholder="40000"></label>' +
-      '<label>Username (Optional)<input class="ltr" name="username"></label>' +
-      '<label class="span2">Password (Optional)<input class="ltr" name="password"></label>' +
+      '<label>Server Address<input class="ltr" name="address" placeholder="127.0.0.1" value="' + esc(o.address || '') + '"></label>' +
+      '<label>Port<input class="ltr" name="port" type="number" placeholder="40000" value="' + esc(o.port || '') + '"></label>' +
+      '<label>Username (Optional)<input class="ltr" name="username" value="' + esc(o.username || '') + '"></label>' +
+      '<label class="span2">Password (Optional)<input class="ltr" name="password" value="' + esc(o.password || '') + '"></label>' +
       '</div>';
-    openModal('New Outbound', body, function (form, setErr) {
+    openModal(isEdit ? 'Edit Outbound' : 'New Outbound', body, function (form, setErr) {
       var f = form.elements;
-      api('POST', 'outbounds', {
+      var payload = {
         tag: f.tag.value.trim(),
         remark: f.remark.value.trim(),
         protocol: f.protocol.value,
@@ -950,10 +952,15 @@ function renderRouting() {
         port: parseInt(f.port.value, 10) || 0,
         username: f.username.value.trim(),
         password: f.password.value.trim()
-      }).then(function () {
+      };
+      var req = isEdit
+        ? api('PUT', 'outbounds/' + encodeURIComponent(o.id), payload)
+        : api('POST', 'outbounds', payload);
+      req.then(function () {
         closeModal();
-        toast('Outbound created');
-        renderRouting();
+        toast(isEdit ? 'Outbound updated' : 'Outbound created');
+        if (state.page === 'outbounds' && typeof renderOutbounds === 'function') renderOutbounds();
+        else if (typeof renderRouting === 'function') renderRouting();
       }).catch(function (e) { setErr(e.message); });
     });
   }
