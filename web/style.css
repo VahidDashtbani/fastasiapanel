@@ -477,3 +477,13 @@ tbody tr:hover {
   background: rgba(239, 68, 68, 0.15);
   border-color: rgba(239, 68, 68, 0.38);
 }
+
+.traffic-chart-card { padding: 14px 16px; }
+.traffic-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.traffic-legend { display: flex; align-items: center; gap: 14px; font-size: 12.5px; }
+.lg-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+.lg-dot.down { background: #22c55e; }
+.lg-dot.up { background: #38bdf8; }
+.traffic-svg { width: 100%; height: 150px; display: block; border-radius: 8px; background: rgba(15, 23, 42, 0.35); }
+.traffic-grid { stroke: rgba(148, 163, 184, 0.16); stroke-dasharray: 3 3; stroke-width: 1; }
+.traffic-axis { fill: rgba(148, 163, 184, 0.75); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

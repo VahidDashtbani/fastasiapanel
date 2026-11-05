@@ -204,6 +204,64 @@
       '<div class="gauge-info"><small>' + esc(title) + '</small><b class="num">' + mainText + '</b><span>' + subText + '</span></div></div>';
   }
 
+  
+  var trafficHistory = [];
+  function pushTrafficSample(upBps, downBps) {
+    trafficHistory.push({
+      up: Math.max(0, Number(upBps) || 0),
+      down: Math.max(0, Number(downBps) || 0),
+      t: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    });
+    if (trafficHistory.length > 30) trafficHistory.shift();
+  }
+
+  function renderTrafficChartSvg() {
+    if (!trafficHistory.length) {
+      return '<div class="muted" style="padding:24px 0;text-align:center">Collecting live traffic samples...</div>';
+    }
+    var w = 640, h = 150, padL = 8, padR = 8, padT = 12, padB = 22;
+    var plotW = w - padL - padR;
+    var plotH = h - padT - padB;
+    var maxVal = 1;
+    trafficHistory.forEach(function (pt) {
+      if (pt.up > maxVal) maxVal = pt.up;
+      if (pt.down > maxVal) maxVal = pt.down;
+    });
+    var n = trafficHistory.length;
+    var stepX = n > 1 ? plotW / (n - 1) : 0;
+
+    function ptsFor(key) {
+      return trafficHistory.map(function (pt, idx) {
+        var x = padL + idx * stepX;
+        var y = padT + plotH - (pt[key] / maxVal) * plotH;
+        return x.toFixed(1) + ',' + y.toFixed(1);
+      });
+    }
+
+    var upLine = ptsFor('up').join(' ');
+    var downLine = ptsFor('down').join(' ');
+    var downArea = downLine + ' ' + (padL + (n - 1) * stepX).toFixed(1) + ',' + (padT + plotH) + ' ' + padL + ',' + (padT + plotH);
+    var upArea = upLine + ' ' + (padL + (n - 1) * stepX).toFixed(1) + ',' + (padT + plotH) + ' ' + padL + ',' + (padT + plotH);
+    var firstLabel = trafficHistory[0].t;
+    var lastLabel = trafficHistory[n - 1].t;
+
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" class="traffic-svg" preserveAspectRatio="none">' +
+      '<defs>' +
+      '<linearGradient id="fapDownGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#22c55e" stop-opacity="0.32"/><stop offset="100%" stop-color="#22c55e" stop-opacity="0.01"/></linearGradient>' +
+      '<linearGradient id="fapUpGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#38bdf8" stop-opacity="0.26"/><stop offset="100%" stop-color="#38bdf8" stop-opacity="0.01"/></linearGradient>' +
+      '</defs>' +
+      '<line x1="' + padL + '" y1="' + (padT + plotH * 0.5).toFixed(1) + '" x2="' + (w - padR) + '" y2="' + (padT + plotH * 0.5).toFixed(1) + '" class="traffic-grid"/>' +
+      '<line x1="' + padL + '" y1="' + (padT + plotH).toFixed(1) + '" x2="' + (w - padR) + '" y2="' + (padT + plotH).toFixed(1) + '" class="traffic-grid"/>' +
+      '<polygon points="' + downArea + '" fill="url(#fapDownGrad)"/>' +
+      '<polygon points="' + upArea + '" fill="url(#fapUpGrad)"/>' +
+      '<polyline fill="none" stroke="#22c55e" stroke-width="2.2" points="' + downLine + '"/>' +
+      '<polyline fill="none" stroke="#38bdf8" stroke-width="2" points="' + upLine + '"/>' +
+      '<text x="' + padL + '" y="' + (h - 5) + '" class="traffic-axis">' + esc(firstLabel) + '</text>' +
+      '<text x="' + (w / 2).toFixed(0) + '" y="' + (h - 5) + '" text-anchor="middle" class="traffic-axis">Peak: ' + esc(fmtBytes(maxVal)) + '/s</text>' +
+      '<text x="' + (w - padR) + '" y="' + (h - 5) + '" text-anchor="end" class="traffic-axis">' + esc(lastLabel) + '</text>' +
+      '</svg>';
+  }
+
   function renderDashboard() {
     topActions.innerHTML = '<div class="top-tools">' +
       '<button type="button" class="btn sec sm" id="dashRefreshBtn">Refresh Now</button>' +
