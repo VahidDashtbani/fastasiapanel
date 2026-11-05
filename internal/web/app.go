@@ -1849,20 +1849,65 @@ func (a *App) getXrayConfig(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) getXrayLogs(w http.ResponseWriter, r *http.Request) {
 	logType := r.URL.Query().Get("type")
+	level := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("level")))
+	query := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+
 	file := "data/xray-error.log"
 	if logType == "access" {
 		file = "data/xray-access.log"
 	}
 	b, err := os.ReadFile(file)
 	if err != nil {
-		reply(w, http.StatusOK, map[string]string{"lines": "لاگ ثبت نشده است. برای فعال‌سازی، گزینه ثبت لاگ Xray را در تنظیمات روشن کنید."})
+		reply(w, http.StatusOK, map[string]any{
+			"lines":   "لاگ ثبت نشده است. برای فعال‌سازی، گزینه ثبت لاگ Xray را در تنظیمات روشن کنید.",
+			"total":   0,
+			"matched": 0,
+		})
 		return
 	}
-	lines := strings.Split(string(b), "\n")
-	if len(lines) > 120 {
-		lines = lines[len(lines)-120:]
+
+	rawLines := strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n")
+	if len(rawLines) > 400 {
+		rawLines = rawLines[len(rawLines)-400:]
 	}
-	reply(w, http.StatusOK, map[string]string{"lines": strings.Join(lines, "\n")})
+
+	filtered := make([]string, 0, len(rawLines))
+	for _, ln := range rawLines {
+		if strings.TrimSpace(ln) == "" {
+			continue
+		}
+		upper := strings.ToUpper(ln)
+		if level != "" && level != "ALL" {
+			switch level {
+			case "ERROR", "ERR":
+				if !strings.Contains(upper, "[ERROR]") && !strings.Contains(upper, " ERROR ") && !strings.Contains(upper, "FAILED") {
+					continue
+				}
+			case "WARNING", "WARN":
+				if !strings.Contains(upper, "[WARNING]") && !strings.Contains(upper, " WARN ") && !strings.Contains(upper, "WARNING") {
+					continue
+				}
+			case "INFO":
+				if !strings.Contains(upper, "[INFO]") && !strings.Contains(upper, " INFO ") {
+					continue
+				}
+			}
+		}
+		if query != "" && !strings.Contains(strings.ToLower(ln), query) {
+			continue
+		}
+		filtered = append(filtered, ln)
+	}
+
+	if len(filtered) > 160 {
+		filtered = filtered[len(filtered)-160:]
+	}
+
+	reply(w, http.StatusOK, map[string]any{
+		"lines":   strings.Join(filtered, "\n"),
+		"total":   len(rawLines),
+		"matched": len(filtered),
+	})
 }
 
 func downloadFile(urlStr, dest string) error {

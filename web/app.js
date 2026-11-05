@@ -205,6 +205,24 @@
   }
 
   function renderDashboard() {
+    topActions.innerHTML = '<div class="top-tools">' +
+      '<button type="button" class="btn sec sm" id="dashRefreshBtn">Refresh Now</button>' +
+      '<button type="button" class="btn sm" id="dashRestartXrayBtn">Restart Xray</button>' +
+      '</div>';
+
+    var rBtn = document.getElementById('dashRestartXrayBtn');
+    if (rBtn) {
+      rBtn.onclick = function () {
+        rBtn.disabled = true;
+        api('POST', 'xray/restart').then(function () {
+          toast('Xray restarted');
+          load();
+        }).catch(fail).finally(function () {
+          rBtn.disabled = false;
+        });
+      };
+    }
+
     function load() {
       api('GET', 'status').then(function (s) {
         var sys = s.sys || {};
@@ -212,8 +230,20 @@
         var diskPct = sys.disk_total ? (sys.disk_used * 100 / sys.disk_total) : 0;
         var netSpd = '↑ ' + fmtBytes(sys.net_up_speed || 0) + '/s · ↓ ' + fmtBytes(sys.net_down_speed || 0) + '/s';
         var netTot = 'Total: ↑ ' + fmtBytes(sys.net_up || 0) + ' · ↓ ' + fmtBytes(sys.net_down || 0);
+        var coreBadge = s.xray_running
+          ? '<span class="tag ok">Live · Running</span>'
+          : '<span class="tag danger">Stopped</span>';
 
         view.innerHTML =
+          '<div class="card pad" style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">' +
+          '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+          '<span class="dot ' + (s.xray_running ? 'ok' : '') + '"></span>' +
+          '<b>Xray Core Live Monitor</b>' +
+          coreBadge +
+          '<span class="muted">Version: ' + esc(s.xray_version || '-') + ' · CPU: ' + ((sys.cpu || 0).toFixed(1)) + '% · RAM: ' + memPct.toFixed(1) + '%</span>' +
+          '</div>' +
+          '<div class="muted" style="font-size:12px">Auto-refresh: every 3s</div>' +
+          '</div>' +
           '<div class="gauges">' +
           gaugeCard('CPU Usage', sys.cpu || 0, (sys.cpu || 0).toFixed(1) + '%', (sys.cpu_cores || 1) + ' Cores · Load: ' + esc(sys.loads || '-')) +
           gaugeCard('RAM Usage', memPct, fmtBytes(sys.mem_used || 0) + ' / ' + fmtBytes(sys.mem_total || 0), 'Panel RSS: ' + fmtBytes(s.panel_mem)) +
@@ -230,6 +260,10 @@
         applyBars();
       }).catch(fail);
     }
+
+    var refBtn = document.getElementById('dashRefreshBtn');
+    if (refBtn) refBtn.onclick = load;
+
     load();
     state.timer = setInterval(load, 3000);
   }
@@ -1131,17 +1165,91 @@ function renderRouting() {
   }
 
   function renderLogs() {
+    if (!state.logLevel) state.logLevel = 'ALL';
+    if (typeof state.logQuery !== 'string') state.logQuery = '';
+
     topActions.innerHTML = '<div class="top-tools">' +
       '<button class="btn sec" data-act="log-err">Error Log</button>' +
       '<button class="btn sec" data-act="log-acc">Access Log</button>' +
       '<button class="btn" data-act="show-xcfg">Inspect Xray JSON</button></div>';
 
+    view.innerHTML =
+      '<div class="card pad">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">' +
+      '<h3 style="margin:0">Live Xray Log (<span id="logTypeLabel">' + esc((state.logType || 'error').toUpperCase()) + '</span>)</h3>' +
+      '<div id="logStats" class="muted" style="font-size:12px">Loading...</div>' +
+      '</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center">' +
+      '<input type="search" id="logSearchInput" class="ltr" placeholder="Search IP, email, inbound, error..." value="' + esc(state.logQuery) + '" style="flex:1;min-width:220px">' +
+      '<button type="button" class="btn sm ' + (state.logLevel === 'ALL' ? '' : 'sec') + '" data-lvl="ALL">All</button>' +
+      '<button type="button" class="btn sm ' + (state.logLevel === 'ERROR' ? '' : 'sec') + '" data-lvl="ERROR">Error</button>' +
+      '<button type="button" class="btn sm ' + (state.logLevel === 'WARNING' ? '' : 'sec') + '" data-lvl="WARNING">Warning</button>' +
+      '<button type="button" class="btn sm ' + (state.logLevel === 'INFO' ? '' : 'sec') + '" data-lvl="INFO">Info</button>' +
+      '<button type="button" class="btn sec sm" id="logClearBtn">Clear</button>' +
+      '<button type="button" class="btn sec sm" id="logCopyBtn">Copy</button>' +
+      '</div>' +
+      '<pre class="link-box" id="logOutputPre" style="max-height:460px;white-space:pre-wrap;font-size:12px"></pre>' +
+      '</div>';
+
+    var searchEl = document.getElementById('logSearchInput');
+    var preEl = document.getElementById('logOutputPre');
+    var statsEl = document.getElementById('logStats');
+    var typeLbl = document.getElementById('logTypeLabel');
+
+    function syncLevelButtons() {
+      view.querySelectorAll('[data-lvl]').forEach(function (b) {
+        b.className = 'btn sm ' + (b.dataset.lvl === state.logLevel ? '' : 'sec');
+      });
+    }
+
     function loadLog() {
-      api('GET', 'xray/logs?type=' + state.logType).then(function (res) {
-        view.innerHTML = '<div class="card pad"><h3>Live Xray Log (' + esc(state.logType.toUpperCase()) + ')</h3>' +
-          '<pre class="link-box" style="max-height:460px;white-space:pre-wrap;font-size:12px">' + esc(res.lines || '') + '</pre></div>';
+      var q = encodeURIComponent(state.logQuery || '');
+      var lvl = encodeURIComponent(state.logLevel || 'ALL');
+      var t = encodeURIComponent(state.logType || 'error');
+      api('GET', 'xray/logs?type=' + t + '&level=' + lvl + '&q=' + q).then(function (res) {
+        if (typeLbl) typeLbl.textContent = (state.logType || 'error').toUpperCase();
+        if (preEl) preEl.textContent = res.lines || 'No matching log lines.';
+        if (statsEl) {
+          var matched = (typeof res.matched === 'number') ? res.matched : 0;
+          var total = (typeof res.total === 'number') ? res.total : 0;
+          statsEl.textContent = 'Showing ' + matched + ' of ' + total + ' lines · Auto-refresh 4s';
+        }
       }).catch(fail);
     }
+
+    if (searchEl) {
+      searchEl.addEventListener('input', function () {
+        state.logQuery = searchEl.value || '';
+        loadLog();
+      });
+    }
+
+    view.querySelectorAll('[data-lvl]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        state.logLevel = b.dataset.lvl || 'ALL';
+        syncLevelButtons();
+        loadLog();
+      });
+    });
+
+    var clearBtn = document.getElementById('logClearBtn');
+    if (clearBtn) {
+      clearBtn.onclick = function () {
+        state.logQuery = '';
+        state.logLevel = 'ALL';
+        if (searchEl) searchEl.value = '';
+        syncLevelButtons();
+        loadLog();
+      };
+    }
+
+    var copyBtn = document.getElementById('logCopyBtn');
+    if (copyBtn) {
+      copyBtn.onclick = function () {
+        copy(preEl ? preEl.textContent : '');
+      };
+    }
+
     loadLog();
     state.timer = setInterval(loadLog, 4000);
   }
