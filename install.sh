@@ -1,96 +1,78 @@
-#!/usr/bin/env bash
-set -Eeuo pipefail
+  rm -rf "${APP_DIR}"
+  rm -f /usr/local/bin/fastpanel
 
-APP_NAME="fastasiapanel"
-APP_DIR="/opt/fastasiapanel"
-BIN_PATH="${APP_DIR}/fastasiapanel"
-SERVICE_PATH="/etc/systemd/system/fastasiapanel.service"
-REPO="VahidDashtbani/fastasiapanel"
+  printf 'FastAsiaPanel uninstalled.\n'
+  exit 0
+}
 
-if [[ "${EUID}" -ne 0 ]]; then
-  printf 'Run this installer as root.\n' >&2
-  exit 1
-fi
+pause_menu() {
+  printf '\n'
+  read -rp "Press Enter to continue..."
+}
 
-if ! command -v systemctl >/dev/null 2>&1; then
-  printf 'systemd is required.\n' >&2
-  exit 1
-fi
+run_menu() {
+  local choice
 
-if ! command -v curl >/dev/null 2>&1; then
-  printf 'curl is required. Install it and run the installer again.\n' >&2
-  exit 1
-fi
+  while true; do
+    clear
+    printf '%b' "${CYAN}"
+    printf '========================================\n'
+    printf '             FastAsiaPanel\n'
+    printf '           Management Console\n'
+    printf '========================================\n'
+    printf '%b' "${PLAIN}"
 
-case "$(uname -m)" in
-  x86_64|amd64) ARCH="amd64" ;;
-  aarch64|arm64) ARCH="arm64" ;;
-  armv7l) ARCH="armv7" ;;
-  *) printf 'Unsupported architecture: %s\n' "$(uname -m)" >&2; exit 1 ;;
+    printf '  1. Panel status\n'
+    printf '  2. Start panel\n'
+    printf '  3. Stop panel\n'
+    printf '  4. Restart panel\n'
+    printf '  5. Change panel port\n'
+    printf '  6. Panel information\n'
+    printf '  7. Restart panel and Xray\n'
+    printf '  8. View logs\n'
+    printf '  9. Uninstall panel\n'
+    printf '  0. Exit\n\n'
+
+    read -rp "Select an option [0-9]: " choice
+
+    case "${choice}" in
+      1) show_status; pause_menu ;;
+      2) systemctl start "${SERVICE}"; printf 'Panel started.\n'; pause_menu ;;
+      3) systemctl stop "${SERVICE}"; printf 'Panel stopped.\n'; pause_menu ;;
+      4) restart_panel; pause_menu ;;
+      5) change_port; pause_menu ;;
+      6) show_info; pause_menu ;;
+      7) restart_panel; pause_menu ;;
+      8) journalctl -u "${SERVICE}" -f ;;
+      9) uninstall_panel ;;
+      0) exit 0 ;;
+      *) printf '%bInvalid option.%b\n' "${RED}" "${PLAIN}"; sleep 1 ;;
+    esac
+  done
+}
+
+case "${1:-}" in
+  "") run_menu ;;
+  start) systemctl start "${SERVICE}" ;;
+  stop) systemctl stop "${SERVICE}" ;;
+  restart) restart_panel ;;
+  status) show_status ;;
+  info) show_info ;;
+  port) change_port ;;
+  log|logs) journalctl -u "${SERVICE}" -f ;;
+  xray-restart) restart_panel ;;
+  uninstall) uninstall_panel ;;
+  *)
+    printf 'Usage: fastpanel [start|stop|restart|status|info|port|log|xray-restart|uninstall]\n'
+    exit 2
+    ;;
 esac
+CLIEOF
 
-if [[ -r /etc/os-release ]]; then
-  source /etc/os-release
-fi
-case "${ID:-}" in
-  debian|ubuntu) if ! command -v unzip >/dev/null 2>&1; then apt-get update -q && apt-get install -y -q unzip; fi ;;
-  fedora|rhel|rocky|almalinux) if ! command -v unzip >/dev/null 2>&1; then dnf install -y unzip; fi ;;
-  alpine) if ! command -v unzip >/dev/null 2>&1; then apk add unzip; fi ;;
-esac
-mkdir -p "${APP_DIR}/data"
-chmod 700 "${APP_DIR}" "${APP_DIR}/data"
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "${TMP_DIR}"' EXIT
-ASSET="https://github.com/${REPO}/releases/latest/download/fastasiapanel-linux-${ARCH}.tar.gz"
-curl --fail --location --retry 3 --output "${TMP_DIR}/panel.tar.gz" "${ASSET}"
-tar -xzf "${TMP_DIR}/panel.tar.gz" -C "${TMP_DIR}"
-test -x "${TMP_DIR}/fastasiapanel"
-install -m 0750 "${TMP_DIR}/fastasiapanel" "${BIN_PATH}"
-if [[ -d "${TMP_DIR}/web" ]]; then
-  install -d -m 0750 "${APP_DIR}/web"
-  cp -a "${TMP_DIR}/web/." "${APP_DIR}/web/"
-  find "${APP_DIR}/web" -type f -exec chmod 0640 {} \;
-else
-  printf 'Release archive does not contain web assets.\n' >&2
-  exit 1
-fi
+  chmod 0750 /usr/local/bin/fastpanel
+}
 
-case "${ARCH}" in
-  amd64) XRAY_ARCH="64" ;;
-  arm64) XRAY_ARCH="arm64-v8a" ;;
-  armv7) XRAY_ARCH="arm32-v7a" ;;
-esac
-XRAY_URL="https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${XRAY_ARCH}.zip"
-curl --fail --location --retry 3 --output "${TMP_DIR}/xray.zip" "${XRAY_URL}"
-unzip -oq "${TMP_DIR}/xray.zip" -d "${TMP_DIR}/xray"
-install -m 0750 "${TMP_DIR}/xray/xray" "${APP_DIR}/xray"
-for asset in geoip.dat geosite.dat; do
-  if [[ -f "${TMP_DIR}/xray/${asset}" ]]; then install -m 0640 "${TMP_DIR}/xray/${asset}" "${APP_DIR}/${asset}"; fi
-done
-
-if [[ ! -f "${APP_DIR}/panel.env" ]]; then
-  PANEL_USER="$(openssl rand -hex 6)"
-  PANEL_PASS="$(openssl rand -base64 24 | tr -d '\n')"
-  COOKIE_SECRET="$(openssl rand -hex 32)"
-  cat > "${APP_DIR}/panel.env" <<ENV
-PANEL_ADDR=:2053
-PANEL_USERNAME=${PANEL_USER}
-PANEL_PASSWORD=${PANEL_PASS}
-PANEL_COOKIE_SECRET=${COOKIE_SECRET}
-PANEL_SECURE_COOKIE=false
-DB_FILE=${APP_DIR}/data/fastasiapanel.json
-XRAY_BIN=${APP_DIR}/xray
-PANEL_PUBLIC_HOST=
-XRAY_CONFIG=${APP_DIR}/data/xray.json
-ENV
-  chmod 600 "${APP_DIR}/panel.env"
-else
-  if grep -q '^XRAY_BIN=' "${APP_DIR}/panel.env"; then
-    sed -i "s|^XRAY_BIN=.*|XRAY_BIN=${APP_DIR}/xray|" "${APP_DIR}/panel.env"
-  else
-    printf 'XRAY_BIN=%s/xray\n' "${APP_DIR}" >> "${APP_DIR}/panel.env"
-  fi
-fi
+create_cli
 
 cat > "${SERVICE_PATH}" <<UNIT
 [Unit]
@@ -118,10 +100,16 @@ UNIT
 
 systemctl daemon-reload
 systemctl enable --now "${APP_NAME}.service"
+
 PANEL_USER="$(sed -n 's/^PANEL_USERNAME=//p' "${APP_DIR}/panel.env" | tail -n1)"
 PANEL_PASS="$(sed -n 's/^PANEL_PASSWORD=//p' "${APP_DIR}/panel.env" | tail -n1)"
+PANEL_PORT="$(sed -n 's/^PANEL_ADDR=//p' "${APP_DIR}/panel.env" | tail -n1)"
+PANEL_PORT="${PANEL_PORT##*:}"
+
 printf '\nFastAsiaPanel installed.\n'
 printf 'Username: %s\n' "${PANEL_USER}"
 printf 'Password: %s\n' "${PANEL_PASS}"
+printf 'Port: %s\n' "${PANEL_PORT}"
 printf 'Credentials are also stored in %s/panel.env\n' "${APP_DIR}"
 printf 'Service: systemctl status %s\n' "${APP_NAME}"
+printf 'Management: fastpanel\n'
