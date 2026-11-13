@@ -5,10 +5,14 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - goarch: amd64
@@ -18,7 +22,7 @@ jobs:
             goarm: ""
             suffix: linux-arm64
           - goarch: arm
-            goarm: 7
+            goarm: "7"
             suffix: linux-armv7
 
     steps:
@@ -38,14 +42,31 @@ jobs:
           CGO_ENABLED: 0
         run: |
           go mod tidy
-          go build -ldflags="-checklinkname=0 -s -w" -o fastasiapanel .
+          go build -ldflags="-checklinkname=0 -s -w -X main.panelVersion=${GITHUB_REF_NAME#v}" -o fastasiapanel .
 
       - name: Package
-        run: |
-          tar -czf fastasiapanel-${{ matrix.suffix }}.tar.gz fastasiapanel
+        run: tar -czf fastasiapanel-${{ matrix.suffix }}.tar.gz fastasiapanel
 
-      - name: Upload Release
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastasiapanel-${{ matrix.suffix }}
+          path: fastasiapanel-${{ matrix.suffix }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: fastasiapanel-${{ matrix.suffix }}.tar.gz
+          files: dist/*.tar.gz
           generate_release_notes: true
