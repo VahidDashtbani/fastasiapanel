@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ورود | FastAsiaPanel</title>
+<style>
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#14213d;font-family:Tahoma,system-ui,sans-serif}
+form{background:#fff;border-radius:12px;padding:26px;width:min(340px,92vw)}
+h1{margin:0 0 16px;font-size:19px;color:#1b2437}
+input{width:100%;box-sizing:border-box;padding:10px;margin-bottom:10px;border:1px solid #d5dbe7;border-radius:8px;font:inherit}
+button{width:100%;padding:10px;border:0;border-radius:8px;background:#2f6fed;color:#fff;font:inherit;font-weight:600;cursor:pointer}
+#err{color:#d64545;min-height:20px;font-size:13px;margin-bottom:6px}
+</style></head>
+<body>
+<form id="f"><h1>ورود به FastAsiaPanel</h1>
+<input id="u" placeholder="نام کاربری" autocomplete="username" required>
+<input id="p" type="password" placeholder="رمز عبور" autocomplete="current-password" required>
+<div id="err" role="alert"></div><button>ورود</button></form>
+<script>
+document.getElementById('f').onsubmit = async e => {
+  e.preventDefault();
+  const r = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({username: u.value, password: p.value})});
+  if (r.ok) location.href = '/'; else err.textContent = 'نام کاربری یا رمز عبور اشتباه است';
+};
+</script></body></html>

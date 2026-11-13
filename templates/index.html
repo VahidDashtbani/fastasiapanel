@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FastAsiaPanel</title>
+<style>
+:root{
+  --bg:#eef1f6;--surface:#fff;--line:#e0e5ee;--text:#1b2437;--muted:#6b768c;
+  --side:#14213d;--side-text:#b9c3d8;--accent:#2f6fed;--accent-d:#2559c4;
+  --ok:#1f9d6b;--danger:#d64545;--row:#f6f8fc;--warn:#c47f17;
+}
+:root[data-theme="dark"]{
+  --bg:#0e1320;--surface:#171e30;--line:#26304a;--text:#e5eaf5;--muted:#8d99b3;
+  --side:#0a0f1c;--side-text:#8d99b3;--row:#1b2338;--warn:#e0a83c;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font-family:Tahoma,"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px;display:flex}
+button,input,select,textarea{font:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* sidebar */
+aside{width:220px;background:var(--side);color:var(--side-text);display:flex;flex-direction:column;padding:18px 12px;flex-shrink:0}
+.brand{color:#fff;font-weight:700;font-size:17px;padding:4px 10px 18px;display:flex;align-items:center;gap:8px}
+.brand i{width:28px;height:28px;border-radius:8px;background:var(--accent);display:grid;place-items:center;font-style:normal;font-size:15px}
+nav button{display:flex;align-items:center;gap:10px;width:100%;background:none;border:0;color:inherit;padding:10px 12px;border-radius:8px;cursor:pointer;text-align:start;margin-bottom:2px}
+nav button:hover{background:rgba(255,255,255,.06)}
+nav button.on{background:var(--accent);color:#fff}
+.side-foot{margin-top:auto;font-size:12px;padding:0 10px}
+
+/* main */
+main{flex:1;min-width:0;padding:22px 26px;overflow:auto}
+.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;gap:10px}
+.top h1{font-size:20px;margin:0}
+.btn{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;font-weight:600}
+.btn:hover{background:var(--accent-d)}
+.btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+.btn.ghost:hover{background:var(--row)}
+.btn.sm{padding:5px 10px;font-size:12.5px}
+.btn.danger{background:var(--danger)}
+.btn.danger:hover{background:#b03030}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:20px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.stat small{color:var(--muted);display:block;margin-bottom:6px}
+.stat b{font-size:22px}
+.stat b.ok{color:var(--ok)}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:18px}
+.tools{display:flex;gap:10px;padding:12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tools input{flex:1;max-width:280px}
+input,select,textarea{background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px 11px;width:100%}
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:620px}
+th,td{padding:11px 14px;text-align:start;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--muted);font-weight:600;font-size:12.5px;background:var(--row)}
+tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--row)}
+.tag{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;background:rgba(47,111,237,.12);color:var(--accent)}
+.tag.ok{background:rgba(31,157,107,.14);color:var(--ok)}
+.tag.warn{background:rgba(196,127,23,.14);color:var(--warn)}
+.tag.danger{background:rgba(214,69,69,.14);color:var(--danger)}
+.num{font-variant-numeric:tabular-nums;direction:ltr;display:inline-block}
+.empty{padding:38px 16px;text-align:center;color:var(--muted)}
+.link{direction:ltr;text-align:left;max-width:340px;overflow:hidden;text-overflow:ellipsis;display:inline-block;vertical-align:middle;font-family:Consolas,monospace;font-size:12.5px}
+
+/* modal */
+.back{position:fixed;inset:0;background:rgba(8,12,24,.55);display:none;align-items:center;justify-content:center;padding:16px;z-index:20;overflow-y:auto}
+.back.open{display:flex}
+.modal{background:var(--surface);border-radius:12px;width:100%;max-width:520px;padding:20px;border:1px solid var(--line);max-height:92vh;overflow-y:auto}
+.modal h3{margin:0 0 14px}
+.field{margin-bottom:12px}
+.field label{display:block;margin-bottom:5px;color:var(--muted);font-size:12.5px}
+.field .hint{font-size:11.5px;color:var(--muted);margin-top:4px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.actions{display:flex;gap:8px;justify-content:flex-start;margin-top:16px;flex-wrap:wrap}
+.out{margin-top:12px;padding:10px;border-radius:8px;background:var(--row);border:1px dashed var(--line);display:none}
+.out code{direction:ltr;display:block;text-align:left;word-break:break-all;font-size:12.5px;margin-bottom:8px;max-height:120px;overflow:auto}
+.reality-box{background:var(--row);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:12px}
+.reality-box label{font-weight:600;color:var(--text)}
+.reality-box .kv{font-family:Consolas,monospace;font-size:11.5px;direction:ltr;text-align:left;word-break:break-all;color:var(--muted);margin-top:4px}
+
+#toast{position:fixed;bottom:20px;left:20px;background:var(--text);color:var(--bg);padding:10px 16px;border-radius:8px;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none;z-index:30}
+#toast.show{opacity:1;transform:none}
+
+@media(max-width:720px){
+  body{flex-direction:column}
+  aside{width:100%;flex-direction:row;align-items:center;padding:8px 10px;overflow-x:auto;gap:6px}
+  .brand{padding:0 8px 0 0}
+  nav{display:flex;gap:4px}
+  nav button{margin:0;white-space:nowrap}
+  .side-foot{display:none}
+  main{padding:16px}
+  .row2{grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce){#toast{transition:none}}
+</style>
+</head>
+<body>
+
+<aside>
+  <div class="brand"><i>⚡</i> FastAsiaPanel</div>
+  <nav>
+    <button class="on" data-view="inbounds">اینباندها</button>
+    <button data-view="clients">کاربران</button>
+    <button data-view="settings">تنظیمات</button>
+  </nav>
+  <div class="side-foot">
+    <button class="btn ghost sm" id="themeBtn" style="width:100%;color:var(--side-text);border-color:rgba(255,255,255,.14)">تغییر پوسته</button>
+    <div style="margin-top:10px" id="ver">...</div>
+    <button class="btn ghost sm" id="logoutBtn" style="width:100%;margin-top:6px;color:var(--side-text);border-color:rgba(255,255,255,.14)">خروج</button>
+  </div>
+</aside>
+
+<main>
+  <div class="top">
+    <h1 id="title">اینباندها</h1>
+    <button class="btn" id="addInboundBtn">+ اینباند جدید</button>
+  </div>
+
+  <section class="stats">
+    <div class="stat"><small>وضعیت Xray</small><b class="ok" id="stStatus">در حال اتصال</b></div>
+    <div class="stat"><small>تعداد اینباند</small><b id="stInbounds">0</b></div>
+    <div class="stat"><small>تعداد کاربر</small><b id="stClients">0</b></div>
+    <div class="stat"><small>نسخه</small><b id="stVer" class="num">-</b></div>
+  </section>
+
+  <!-- inbounds -->
+  <section id="view-inbounds" class="card">
+    <div class="tools"><input id="search" placeholder="جستجو بر اساس نام یا پورت..."></div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>ID</th><th>نام</th><th>پروتکل</th><th>شبکه</th><th>امنیت</th><th>پورت</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+        <tbody id="inboundRows"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="inboundEmpty" style="display:none">هنوز اینباندی ساخته نشده. با «اینباند جدید» شروع کنید.</div>
+  </section>
+
+  <!-- clients -->
+  <section id="view-clients" class="card" style="display:none">
+    <div class="tools"><input id="searchClients" placeholder="جستجوی کاربر..."></div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>کاربر</th><th>اینباند</th><th>مصرف</th><th>انقضا</th><th>وضعیت</th><th>لینک</th><th></th></tr></thead>
+        <tbody id="clientRows"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="clientEmpty">هنوز کاربری نساخته‌اید. از جدول اینباندها «افزودن کاربر» را بزنید.</div>
+  </section>
+
+  <!-- settings -->
+  <section id="view-settings" class="card" style="display:none">
+    <div class="tools"><h3 style="margin:0">تنظیمات پنل</h3></div>
+    <div style="padding:16px;max-width:480px">
+      <div class="field"><label>رمز عبور فعلی</label><input id="pwOld" type="password"></div>
+      <div class="field"><label>رمز عبور جدید (حداقل ۸ کاراکتر)</label><input id="pwNew" type="password"></div>
+      <button class="btn" id="savePw">ذخیره رمز</button>
+      <hr style="margin:24px 0;border:0;border-top:1px solid var(--line)">
+      <button class="btn danger" id="restartXray">ری‌استارت Xray</button>
+      <button class="btn ghost" id="backup">دانلود بکاپ DB</button>
+    </div>
+  </section>
+</main>
+
+<!-- modal: inbound -->
+<div class="back" id="mInbound">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="t1">
+    <h3 id="t1">اینباند جدید</h3>
+    <div class="field"><label for="remark">نام (Remark)</label><input id="remark" placeholder="مثلاً reality-443"></div>
+    <div class="field"><label for="port">پورت</label><input id="port" type="number" min="1" max="65535"></div>
+    <div class="row2">
+      <div class="field"><label for="proto">پروتکل</label>
+        <select id="proto">
+          <option value="vless">VLESS</option>
+          <option value="vmess">VMess</option>
+          <option value="trojan">Trojan</option>
+          <option value="shadowsocks">Shadowsocks</option>
+        </select></div>
+      <div class="field"><label for="network">شبکه</label>
+        <select id="network">
+          <option value="tcp">TCP</option>
+          <option value="ws">WebSocket</option>
+          <option value="grpc">gRPC</option>
+        </select></div>
+    </div>
+    <div class="field"><label for="security">امنیت</label>
+      <select id="security">
+        <option value="none">بدون TLS</option>
+        <option value="tls">TLS</option>
+        <option value="reality">Reality (فقط VLESS/TCP)</option>
+      </select></div>
+
+    <div id="tlsFields" style="display:none">
+      <div class="row2">
+        <div class="field"><label>مسیر Cert</label><input id="certFile" placeholder="/etc/xray/cert.pem"></div>
+        <div class="field"><label>مسیر Key</label><input id="keyFile" placeholder="/etc/xray/key.pem"></div>
+      </div>
+    </div>
+
+    <div id="realityFields" style="display:none">
+      <div class="reality-box">
+        <label>کلید Reality</label>
+        <button class="btn sm" id="genRealityBtn" type="button" style="margin-top:6px">تولید کلید جدید</button>
+        <div class="kv" id="realityKeysInfo" style="display:none"></div>
+      </div>
+      <div class="field"><label>Dest (سایت هدف)</label><input id="realityDest" placeholder="www.microsoft.com:443"></div>
+      <div class="field"><label>Server Name (SNI)</label><input id="realitySNI" placeholder="www.microsoft.com"></div>
+      <div class="field"><label>Private Key (فقط سرور)</label><input id="realityPriv"></div>
+      <div class="field"><label>Public Key (کلاینت)</label><input id="realityPub"></div>
+      <div class="field"><label>Short ID (هگز زوج)</label><input id="realitySid" placeholder="a1b2c3d4"></div>
+    </div>
+
+    <div class="field"><label>Path / serviceName (اختیاری)</label><input id="path" placeholder="/ws یا grpc-service"></div>
+
+    <div class="actions">
+      <button class="btn" id="saveInbound">ایجاد اینباند</button>
+      <button class="btn ghost" data-close>انصراف</button>
+    </div>
+  </div>
+</div>
+
+<!-- modal: client -->
+<div class="back" id="mClient">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="t2">
+    <h3 id="t2">افزودن کاربر</h3>
+    <div class="field"><label>اینباند</label><input id="cInboundLabel" disabled></div>
+    <div class="field"><label for="email">ایمیل / نام کاربر</label><input id="email"></div>
+    <div class="row2">
+      <div class="field"><label for="totalBytes">حجم مجاز (گیگ، ۰=نامحدود)</label><input id="totalBytes" type="number" min="0" step="0.1" value="0"></div>
+      <div class="field"><label for="expiryDays">انقضا (روز، ۰=هرگز)</label><input id="expiryDays" type="number" min="0" value="0"></div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="saveClient">افزودن کاربر</button>
+      <button class="btn ghost" data-close>بستن</button>
+    </div>
+    <div class="out" id="out">
+      <code id="outLink"></code>
+      <button class="btn sm" id="copyOut">کپی لینک</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" role="status"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let inbounds = [];
+let clients = [];
+let activeInbound = null;
+
+function toast(msg){
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2400);
+}
+function fixLink(l){ return String(l || '').replace('YOUR_SERVER_IP', location.hostname); }
+async function copy(text){
+  try { await navigator.clipboard.writeText(text); toast('کپی شد'); }
+  catch(e){ toast('کپی نشد؛ دستی انتخاب کنید'); }
+}
+function fmtBytes(n){
+  if (!n) return '0';
+  const u = ['B','KB','MB','GB','TB'];
+  let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toFixed(1) + ' ' + u[i];
+}
+function fmtDate(ms){
+  if (!ms) return 'هرگز';
+  const d = new Date(ms);
+  return d.toLocaleDateString('fa-IR');
+}
+
+/* theme */
+(function(){
+  let th = 'light';
+  try { th = localStorage.getItem('fap-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch(e){}
+  document.documentElement.dataset.theme = th;
+})();
+$('themeBtn').onclick = () => {
+  const r = document.documentElement;
+  r.dataset.theme = r.dataset.theme === 'dark' ? 'light' : 'dark';
+  try { localStorage.setItem('fap-theme', r.dataset.theme); } catch(e){}
+};
+
+/* nav */
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
+  const v = b.dataset.view;
+  $('view-inbounds').style.display = v === 'inbounds' ? '' : 'none';
+  $('view-clients').style.display = v === 'clients' ? '' : 'none';
+  $('view-settings').style.display = v === 'settings' ? '' : 'none';
+  $('title').textContent = b.textContent;
+  $('addInboundBtn').style.display = v === 'inbounds' ? '' : 'none';
+  if (v === 'clients') loadClients();
+});
+
+/* modals */
+const open = id => $(id).classList.add('open');
+const closeAll = () => document.querySelectorAll('.back').forEach(m => m.classList.remove('open'));
+document.querySelectorAll('[data-close]').forEach(b => b.onclick = closeAll);
+document.querySelectorAll('.back').forEach(m => m.addEventListener('mousedown', e => { if (e.target === m) closeAll(); }));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAll(); });
+
+/* conditional fields in inbound form */
+$('security').onchange = () => {
+  const v = $('security').value;
+  $('tlsFields').style.display = v === 'tls' ? '' : 'none';
+  $('realityFields').style.display = v === 'reality' ? '' : 'none';
+  if (v === 'reality') {
+    $('network').value = 'tcp';
+    $('proto').value = 'vless';
+  }
+};
+$('proto').onchange = () => {
+  if ($('security').value === 'reality' && $('proto').value !== 'vless') {
+    $('security').value = 'none'; $('security').onchange();
+  }
+};
+$('network').onchange = () => {
+  if ($('security').value === 'reality' && $('network').value !== 'tcp') {
+    $('security').value = 'none'; $('security').onchange();
+  }
+};
+
+/* reality key generator */
+$('genRealityBtn').onclick = async () => {
+  try {
+    const d = await api('/api/reality/keys');
+    $('realityPriv').value = d.private_key;
+    $('realityPub').value = d.public_key;
+    $('realitySid').value = d.short_id;
+    const info = $('realityKeysInfo');
+    info.style.display = 'block';
+    info.textContent = 'private: ' + d.private_key + ' | public: ' + d.public_key + ' | sid: ' + d.short_id;
+    toast('کلید Reality تولید شد');
+  } catch(e){ toast('تولید کلید ناموفق: ' + e.message); }
+};
+
+/* render */
+function renderInbounds(){
+  const q = $('search').value.trim().toLowerCase();
+  const list = inbounds.filter(i => !q || String(i.remark).toLowerCase().includes(q) || String(i.port).includes(q));
+  $('inboundRows').innerHTML = list.map(i => `
+    <tr>
+      <td class="num">${i.id}</td>
+      <td>${esc(i.remark || '-')}</td>
+      <td><span class="tag">${esc(String(i.protocol).toUpperCase())}</span></td>
+      <td>${esc(i.network || 'tcp')}</td>
+      <td>${i.security === 'reality' ? '<span class="tag warn">Reality</span>' : i.security === 'tls' ? '<span class="tag ok">TLS</span>' : '<span class="tag">None</span>'}</td>
+      <td class="num">${i.port}</td>
+      <td>${i.enable ? '<span class="tag ok">فعال</span>' : '<span class="tag danger">غیرفعال</span>'}</td>
+      <td>
+        <button class="btn sm" data-add="${i.id}">+ کاربر</button>
+        <button class="btn ghost sm" data-toggle="${i.id}">${i.enable ? 'خاموش' : 'روشن'}</button>
+        <button class="btn danger sm" data-del="${i.id}">حذف</button>
+      </td>
+    </tr>`).join('');
+  $('inboundEmpty').style.display = inbounds.length ? 'none' : '';
+  $('stInbounds').textContent = inbounds.length;
+  document.querySelectorAll('[data-add]').forEach(b => b.onclick = () => openClient(Number(b.dataset.add)));
+  document.querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => {
+    try { await api('/api/inbounds/' + b.dataset.toggle + '/toggle', {method:'POST'}); loadInbounds(); toast('تغییر وضعیت اعمال شد'); }
+    catch(e){ toast('خطا: ' + e.message); }
+  });
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('این اینباند و همه کاربرانش حذف شوند؟')) return;
+    try { await api('/api/inbounds/' + b.dataset.del, {method:'DELETE'}); loadInbounds(); toast('حذف شد'); }
+    catch(e){ toast('خطا: ' + e.message); }
+  });
+}
+
+function renderClients(){
+  const q = ($('searchClients').value || '').trim().toLowerCase();
+  const list = clients.filter(c => !q || String(c.email).toLowerCase().includes(q));
+  $('clientRows').innerHTML = list.map(c => `
+    <tr>
+      <td>${esc(c.email)}</td>
+      <td>${esc(c.inbound_name || ('#' + c.inbound_id))}</td>
+      <td class="num">${fmtBytes((c.up||0) + (c.down||0))}${c.total_bytes ? ' / ' + fmtBytes(c.total_bytes) : ''}</td>
+      <td>${fmtDate(c.expiry_time)}</td>
+      <td>${c.enable ? '<span class="tag ok">فعال</span>' : '<span class="tag danger">غیرفعال</span>'}</td>
+      <td><span class="link" title="${esc(c.link || '')}">${esc(c.link || '-')}</span></td>
+      <td>
+        <button class="btn ghost sm" data-copy="${c.id}">کپی</button>
+        <button class="btn ghost sm" data-reset="${c.id}">ریست</button>
+        <button class="btn danger sm" data-delc="${c.id}">حذف</button>
+      </td>
+    </tr>`).join('');
+  $('clientEmpty').style.display = clients.length ? 'none' : '';
+  $('stClients').textContent = clients.length;
+  document.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => {
+    const c = clients.find(x => x.id == b.dataset.copy);
+    if (c && c.link) copy(fixLink(c.link));
+  });
+  document.querySelectorAll('[data-reset]').forEach(b => b.onclick = async () => {
+    try { await api('/api/clients/' + b.dataset.reset + '/reset', {method:'POST'}); loadClients(); toast('ریست شد'); }
+    catch(e){ toast('خطا: ' + e.message); }
+  });
+  document.querySelectorAll('[data-delc]').forEach(b => b.onclick = async () => {
+    if (!confirm('این کاربر حذف شود؟')) return;
+    try { await api('/api/clients/' + b.dataset.delc, {method:'DELETE'}); loadClients(); toast('حذف شد'); }
+    catch(e){ toast('خطا: ' + e.message); }
+  });
+}
+$('search').oninput = renderInbounds;
+$('searchClients').oninput = renderClients;
+
+/* api */
+async function api(url, opts){
+  const r = await fetch(url, opts);
+  if (r.status === 401) { location.href = '/login'; throw new Error('unauthorized'); }
+  if (!r.ok) throw new Error((await r.text()).trim() || r.status);
+  const ct = r.headers.get('content-type') || '';
+  return ct.includes('json') ? r.json() : r.text();
+}
+async function loadInbounds(){
+  try { inbounds = (await api('/api/inbounds')) || []; renderInbounds(); }
+  catch(e){ toast('خطا در دریافت اینباندها: ' + e.message); }
+}
+async function loadClients(){
+  try {
+    clients = (await api('/api/clients')) || [];
+    // اضافه کردن نام اینباند
+    const map = {}; inbounds.forEach(i => map[i.id] = i.remark || ('#' + i.id));
+    clients.forEach(c => c.inbound_name = map[c.inbound_id] || ('#' + c.inbound_id));
+    renderClients();
+  } catch(e){ toast('خطا در دریافت کاربران: ' + e.message); }
+}
+async function loadInfo(){
+  try {
+    const d = await api('/api/status');
+    $('stVer').textContent = 'v' + d.version; $('ver').textContent = d.name + ' v' + d.version;
+    $('stStatus').textContent = d.xray_running ? 'آنلاین' : 'قطع';
+    $('stStatus').style.color = d.xray_running ? 'var(--ok)' : 'var(--danger)';
+  } catch(e){ $('stStatus').textContent = 'قطع'; $('stStatus').style.color = 'var(--danger)'; }
+}
+
+/* actions */
+$('addInboundBtn').onclick = () => {
+  ['remark','port','path','certFile','keyFile','realityDest','realitySNI','realityPriv','realityPub','realitySid'].forEach(k => $(k).value = '');
+  $('proto').value = 'vless'; $('network').value = 'tcp'; $('security').value = 'none';
+  $('security').onchange();
+  open('mInbound'); $('remark').focus();
+};
+$('saveInbound').onclick = async () => {
+  const port = parseInt($('port').value, 10);
+  if (!(port > 0 && port < 65536)) return toast('پورت معتبر وارد کنید');
+  const body = {
+    remark: $('remark').value.trim(),
+    port,
+    protocol: $('proto').value,
+    network: $('network').value,
+    security: $('security').value,
+    path: $('path').value.trim(),
+    cert_file: $('certFile').value.trim(),
+    key_file: $('keyFile').value.trim(),
+    reality_dest: $('realityDest').value.trim(),
+    reality_server_name: $('realitySNI').value.trim(),
+    reality_private_key: $('realityPriv').value.trim(),
+    reality_public_key: $('realityPub').value.trim(),
+    reality_short_id: $('realitySid').value.trim(),
+  };
+  try {
+    await api('/api/inbounds', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    closeAll(); toast('اینباند ساخته شد'); loadInbounds();
+  } catch(e){ toast('ساخت ناموفق: ' + e.message); }
+};
+
+function openClient(id){
+  activeInbound = inbounds.find(i => i.id === id);
+  if (!activeInbound) return;
+  $('cInboundLabel').value = `#${id} - ${activeInbound.remark || activeInbound.port}`;
+  $('email').value = ''; $('totalBytes').value = 0; $('expiryDays').value = 0;
+  $('out').style.display = 'none';
+  open('mClient'); $('email').focus();
+}
+$('saveClient').onclick = async () => {
+  const email = $('email').value.trim();
+  if (!email) return toast('نام کاربر را وارد کنید');
+  const gb = parseFloat($('totalBytes').value) || 0;
+  const days = parseInt($('expiryDays').value, 10) || 0;
+  const body = {
+    inbound_id: activeInbound.id,
+    email,
+    total_bytes: Math.round(gb * 1024 * 1024 * 1024),
+    expiry_time: days > 0 ? Date.now() + days * 86400000 : 0,
+  };
+  try {
+    const d = await api('/api/clients', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const link = fixLink(d.link);
+    $('outLink').textContent = link; $('out').style.display = 'block';
+    toast('کاربر اضافه شد');
+    loadInbounds(); // برای به‌روزرسانی آمار
+  } catch(e){ toast('افزودن ناموفق: ' + e.message); }
+};
+$('copyOut').onclick = () => copy($('outLink').textContent);
+
+/* settings */
+$('savePw').onclick = async () => {
+  try {
+    await api('/api/password', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ old: $('pwOld').value, new: $('pwNew').value }) });
+    $('pwOld').value = ''; $('pwNew').value = '';
+    toast('رمز تغییر کرد');
+  } catch(e){ toast('خطا: ' + e.message); }
+};
+$('restartXray').onclick = async () => {
+  try { await api('/api/xray/restart', {method:'POST'}); toast('Xray ری‌استارت شد'); loadInfo(); }
+  catch(e){ toast('خطا: ' + e.message); }
+};
+$('backup').onclick = () => { window.location.href = '/api/backup'; };
+$('logoutBtn').onclick = async () => {
+  try { await api('/api/logout', {method:'POST'}); } catch(e){}
+  location.href = '/login';
+};
+
+loadInfo(); loadInbounds();
+setInterval(loadInfo, 15000); // هر ۱۵ ثانیه وضعیت Xray را چک کن
+</script>
+</body>
+</html>
