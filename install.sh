@@ -1,115 +1,95 @@
-  rm -rf "${APP_DIR}"
-  rm -f /usr/local/bin/fastpanel
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-  printf 'FastAsiaPanel uninstalled.\n'
-  exit 0
+APP_NAME="fastasiapanel"
+APP_DIR="/opt/fastasiapanel"
+BIN_PATH="${APP_DIR}/fastasiapanel"
+SERVICE_PATH="/etc/systemd/system/${APP_NAME}.service"
+CLI_PATH="/usr/local/bin/fastpanel"
+REPO="VahidDashtbani/fastasiapanel"
+XRAY_BIN="/usr/local/bin/xray"
+XRAY_CONFIG="${APP_DIR}/data/xray.json"
+DB_FILE="${APP_DIR}/data/fastasiapanel.json"
+ENV_FILE="${APP_DIR}/panel.env"
+TMP_DIR=""
+PLAIN=$'\033[0m'
+CYAN=$'\033[1;36m'
+GREEN=$'\033[1;32m'
+RED=$'\033[1;31m'
+YELLOW=$'\033[1;33m'
+
+log()  { printf '%b[INFO]%b %s\n' "$GREEN" "$PLAIN" "$*"; }
+warn() { printf '%b[WARN]%b %s\n' "$YELLOW" "$PLAIN" "$*" >&2; }
+die()  { printf '%b[ERROR]%b %s\n' "$RED" "$PLAIN" "$*" >&2; exit 1; }
+
+cleanup() {
+  if [[ -n "${TMP_DIR}" && -d "${TMP_DIR}" ]]; then
+    rm -rf -- "${TMP_DIR}"
+  fi
+}
+trap cleanup EXIT
+
+require_root() {
+  [[ "${EUID}" -eq 0 ]] || die "Run this installer as root."
 }
 
-pause_menu() {
-  printf '\n'
-  read -rp "Press Enter to continue..."
+install_dependencies() {
+  local missing=()
+  local cmd
+  for cmd in curl tar openssl; do
+    command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+  done
+  ((${#missing[@]} == 0)) && return 0
+
+  log "Installing required packages: ${missing[*]}"
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y curl tar openssl ca-certificates
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y curl tar openssl ca-certificates
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y curl tar openssl ca-certificates
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache curl tar openssl ca-certificates
+  else
+    die "Cannot install dependencies automatically. Install curl, tar and openssl manually."
+  fi
 }
 
-run_menu() {
-  local choice
+detect_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) ARCH="amd64"; XRAY_ARCH="64" ;;
+    aarch64|arm64) ARCH="arm64"; XRAY_ARCH="arm64-v8a" ;;
+    armv7l|armv7*) ARCH="armv7"; XRAY_ARCH="arm32-v7a" ;;
+    *) die "Unsupported CPU architecture: $(uname -m)" ;;
+  esac
+}
 
+read_env_value() {
+  local key="$1"
+  [[ -f "${ENV_FILE}" ]] || return 0
+  sed -n "s/^${key}=//p" "${ENV_FILE}" | tail -n1
+}
+
+valid_port() {
+  [[ "$1" =~ ^[0-9]{1,5}$ ]] && ((10#$1 >= 1 && 10#$1 <= 65535))
+}
+
+select_port() {
+  local default_port="${1:-8080}" answer
   while true; do
-    clear
-    printf '%b' "${CYAN}"
-    printf '========================================\n'
-    printf '             FastAsiaPanel\n'
-    printf '           Management Console\n'
-    printf '========================================\n'
-    printf '%b' "${PLAIN}"
-
-    printf '  1. Panel status\n'
-    printf '  2. Start panel\n'
-    printf '  3. Stop panel\n'
-    printf '  4. Restart panel\n'
-    printf '  5. Change panel port\n'
-    printf '  6. Panel information\n'
-    printf '  7. Restart panel and Xray\n'
-    printf '  8. View logs\n'
-    printf '  9. Uninstall panel\n'
-    printf '  0. Exit\n\n'
-
-    read -rp "Select an option [0-9]: " choice
-
-    case "${choice}" in
-      1) show_status; pause_menu ;;
-      2) systemctl start "${SERVICE}"; printf 'Panel started.\n'; pause_menu ;;
-      3) systemctl stop "${SERVICE}"; printf 'Panel stopped.\n'; pause_menu ;;
-      4) restart_panel; pause_menu ;;
-      5) change_port; pause_menu ;;
-      6) show_info; pause_menu ;;
-      7) restart_panel; pause_menu ;;
-      8) journalctl -u "${SERVICE}" -f ;;
-      9) uninstall_panel ;;
-      0) exit 0 ;;
-      *) printf '%bInvalid option.%b\n' "${RED}" "${PLAIN}"; sleep 1 ;;
-    esac
+    read -r -p "Panel port [${default_port}]: " answer
+    answer="${answer:-$default_port}"
+    if valid_port "$answer"; then
+      printf '%s' "$answer"
+      return
+    fi
+    warn "Enter a valid port between 1 and 65535."
   done
 }
 
-case "${1:-}" in
-  "") run_menu ;;
-  start) systemctl start "${SERVICE}" ;;
-  stop) systemctl stop "${SERVICE}" ;;
-  restart) restart_panel ;;
-  status) show_status ;;
-  info) show_info ;;
-  port) change_port ;;
-  log|logs) journalctl -u "${SERVICE}" -f ;;
-  xray-restart) restart_panel ;;
-  uninstall) uninstall_panel ;;
-  *)
-    printf 'Usage: fastpanel [start|stop|restart|status|info|port|log|xray-restart|uninstall]\n'
-    exit 2
-    ;;
-esac
-CLIEOF
-
-  chmod 0750 /usr/local/bin/fastpanel
-}
-
-create_cli
-
-cat > "${SERVICE_PATH}" <<UNIT
-[Unit]
-Description=FastAsiaPanel
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=${APP_DIR}
-EnvironmentFile=${APP_DIR}/panel.env
-ExecStart=${BIN_PATH}
-Restart=on-failure
-RestartSec=5
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectHome=true
-ProtectSystem=full
-ReadWritePaths=${APP_DIR}
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-systemctl daemon-reload
-systemctl enable --now "${APP_NAME}.service"
-
-PANEL_USER="$(sed -n 's/^PANEL_USERNAME=//p' "${APP_DIR}/panel.env" | tail -n1)"
-PANEL_PASS="$(sed -n 's/^PANEL_PASSWORD=//p' "${APP_DIR}/panel.env" | tail -n1)"
-PANEL_PORT="$(sed -n 's/^PANEL_ADDR=//p' "${APP_DIR}/panel.env" | tail -n1)"
-PANEL_PORT="${PANEL_PORT##*:}"
-
-printf '\nFastAsiaPanel installed.\n'
-printf 'Username: %s\n' "${PANEL_USER}"
-printf 'Password: %s\n' "${PANEL_PASS}"
-printf 'Port: %s\n' "${PANEL_PORT}"
-printf 'Credentials are also stored in %s/panel.env\n' "${APP_DIR}"
-printf 'Service: systemctl status %s\n' "${APP_NAME}"
-printf 'Management: fastpanel\n'
+write_initial_env() {
+  local port="$1" username password secret
+  username="admin"
+  password="$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-20)"
+  secret="$(openssl rand -hex 32)"
