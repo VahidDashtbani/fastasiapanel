@@ -14,7 +14,7 @@
 set -uo pipefail
 
 # ---------- ADJUST THESE TO MATCH YOUR PROJECT ----------
-REPO="${FAP_REPO:-youruser/fastasiapanel}"
+REPO="${FAP_REPO:-VahidDashtbani/fastasiapanel}"
 APP_NAME="fastasiapanel"
 # Release asset: ${APP_NAME}-linux-<arch>.tar.gz, which must contain a folder
 # "${APP_NAME}/" with the binary "${APP_NAME}" and "bin/xray" inside.
