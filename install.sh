@@ -59,7 +59,7 @@ arch() {
 
 echo "Arch: $(arch)"
 
-# Non-interactive mode when FAP_NONINTERACTIVE=1 or no TTY available
+# Support interactive prompts even when invoked via `bash <(curl ...)` or `curl ... | bash`
 if [[ "${FAP_NONINTERACTIVE:-0}" == "1" ]] || [[ ! -t 0 && ! -r /dev/tty ]]; then
     NONINTERACTIVE=1
 else
@@ -78,10 +78,6 @@ tty_read() {
 
 is_ipv4() {
     [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && return 0 || return 1
-}
-
-is_ipv6() {
-    [[ "$1" =~ : ]] && return 0 || return 1
 }
 
 is_domain() {
@@ -180,23 +176,9 @@ select_panel_port() {
 gen_random_string() {
     local length="$1"
     if command -v openssl >/dev/null 2>&1; then
-        openssl rand -base64 $((length * 2)) \
-            | tr -dc 'a-zA-Z0-9' \
-            | head -c "$length"
+        openssl rand -base64 $((length * 2)) | tr -dc 'a-zA-Z0-9' | head -c "$length"
     else
         tr -dc 'a-zA-Z0-9' </dev/urandom | head -c "$length"
-    fi
-}
-
-prompt_or_default() {
-    local __var="$1" __prompt="$2" __default="$3" __env="${4:-$1}"
-    if [[ "$NONINTERACTIVE" == "1" ]]; then
-        printf -v "$__var" '%s' "${!__env:-$__default}"
-    else
-        tty_read "$__prompt" "$__var"
-        if [[ -z "${!__var}" && -n "$__default" ]]; then
-            printf -v "$__var" '%s' "$__default"
-        fi
     fi
 }
 
@@ -248,13 +230,12 @@ install_base() {
 
 install_acme() {
     echo -e "${green}Installing acme.sh for SSL certificate management...${plain}"
-    curl -fsSL https://get.acme.sh | sh >/dev/null 2>&1
-    if [[ $? -ne 0 ]]; then
-        echo -e "${red}Failed to install acme.sh${plain}"
-        return 1
+    if curl -fsSL https://get.acme.sh | sh >/dev/null 2>&1; then
+        echo -e "${green}acme.sh installed successfully${plain}"
+        return 0
     fi
-    echo -e "${green}acme.sh installed successfully${plain}"
-    return 0
+    echo -e "${red}Failed to install acme.sh${plain}"
+    return 1
 }
 
 setup_ssl_certificate() {
@@ -426,10 +407,53 @@ config_after_install() {
         config_pg_dsn="${FAP_DB_DSN:-}"
     fi
 
+    local ssl_scheme="http"
+    local ssl_host="${server_ip}"
+    local ssl_cert=""
+    local ssl_key=""
+
+    if [[ "$NONINTERACTIVE" != "1" ]]; then
+        echo ""
+        echo -e "${green}SSL Certificate Setup:${plain}"
+        echo -e "  1) Let's Encrypt for Domain"
+        echo -e "  2) Let's Encrypt for IPv4 (short-lived)"
+        echo -e "  3) Skip SSL (HTTP / reverse proxy / SSH tunnel)"
+        local ssl_opt="" web_p="80" dom=""
+        tty_read "Choose [3]: " ssl_opt
+        ssl_opt="${ssl_opt:-3}"
+        case "${ssl_opt}" in
+            1)
+                tty_read "Enter domain name: " dom
+                dom="${dom// /}"
+                tty_read "Standalone HTTP port [default 80]: " web_p
+                web_p="${web_p:-80}"
+                if is_domain "${dom}" && setup_ssl_certificate "${dom}" "${web_p}"; then
+                    ssl_scheme="https"
+                    ssl_host="${dom}"
+                    ssl_cert="/root/cert/${dom}/fullchain.pem"
+                    ssl_key="/root/cert/${dom}/privkey.pem"
+                fi
+                ;;
+            2)
+                if [[ -n "${server_ip}" ]]; then
+                    tty_read "Standalone HTTP port [default 80]: " web_p
+                    web_p="${web_p:-80}"
+                    if setup_ip_certificate "${server_ip}" "${web_p}"; then
+                        ssl_scheme="https"
+                        ssl_host="${server_ip}"
+                        ssl_cert="/root/cert/ip/fullchain.pem"
+                        ssl_key="/root/cert/ip/privkey.pem"
+                    fi
+                fi
+                ;;
+            *) ;;
+        esac
+    fi
+
     local prev_umask
     prev_umask=$(umask)
     umask 077
-    cat > "${fap_env_file}" <<EOF !="1" " "" "$NONINTERACTIVE" "${dom}" "${fap_env_file}" "${green}SSL "${prev_umask}" "${server_ip}" "${ssl_opt}" "${web_p}"; "Choose "Enter "Standalone && (HTTP (short-lived)" *) -e / 1) 2) 3) 3]: 600 80]: ;; Certificate Domain" EOF Encrypt FAP_ADDR="0.0.0.0:${config_port}" FAP_ADMIN_PASS="${config_pass}" FAP_ADMIN_USER="${config_user}" FAP_BASE_PATH="${config_base_path}" FAP_DATA="${fap_data_folder}/fastasiapanel.db" FAP_DB="${config_db}" FAP_LISTEN="0.0.0.0:${config_port}" FAP_PG_DSN="${config_pg_dsn}" FAP_PORT="${config_port}" HTTP IPv4 Let's SSH SSL Setup:${plain}" Skip [[ [default ]]; an case cat chmod dom domain echo esac fi for if in is_domain is_ipv4 local name: option port proxy reverse setup_ip_certificate setup_ssl_certificate ssl_host="${server_ip}" ssl_opt ssl_scheme="http" then tty_read tunnel)" umask web_p="${web_p:-80}"> "${fap_service_file}" <<EOF "${fap_service_file}" After="network.target" Description="FastAsiaPanel" EOF EnvironmentFile="-${fap_env_file}" ExecStart="${fap_bin_path}" LimitNOFILE="1048576" Management Restart="always" RestartSec="3" Service Type="simple" WantedBy="multi-user.target" WorkingDirectory="${fap_data_folder}" Xray [Install] [Service] [Unit] chown root:root>/dev/null 2>&1 || true
+    cat > "${fap_env_file}" <<EOF "${fap_env_file}" "${prev_umask}" 600 EOF FAP_ADDR="0.0.0.0:${config_port}" FAP_ADMIN_PASS="${config_pass}" FAP_ADMIN_USER="${config_user}" FAP_BASE_PATH="${config_base_path}" FAP_DATA="${fap_data_folder}/fastasiapanel.db" FAP_DB="${config_db}" FAP_LISTEN="0.0.0.0:${config_port}" FAP_PG_DSN="${config_pg_dsn}" FAP_PORT="${config_port}" FAP_TLS_CERT="${ssl_cert}" FAP_TLS_KEY="${ssl_key}" cat chmod umask> "${fap_service_file}" <<EOF "${fap_service_file}" After="network.target" Description="FastAsiaPanel" EOF EnvironmentFile="-${fap_env_file}" ExecStart="${fap_bin_path}" LimitNOFILE="1048576" Management Restart="always" RestartSec="3" Service Type="simple" WantedBy="multi-user.target" WorkingDirectory="${fap_data_folder}" Xray [Install] [Service] [Unit] chown root:root>/dev/null 2>&1 || true
     chmod 644 "${fap_service_file}" >/dev/null 2>&1 || true
     systemctl daemon-reload
     systemctl enable "${fap_service_name}" >/dev/null 2>&1 || true
@@ -438,7 +462,14 @@ config_after_install() {
     local result_file="${fap_conf_folder}/install-result.env"
     prev_umask=$(umask)
     umask 077
-    cat > "${result_file}" <<EOF "${config_base_path}" "${config_db}" "${config_pass}" "${config_port}" "${config_user}" "${ssl_scheme}://${ssl_host:-SERVER_IP_UNKNOWN}:${config_port}${config_base_path}/" 'FAP_USERNAME="%q\nFAP_PASSWORD=%q\nFAP_PANEL_PORT=%q\nFAP_WEB_BASE_PATH=%q\nFAP_ACCESS_URL=%q\nFAP_DB_TYPE=%q\n'" EOF FAP_USERNAME="%q\n" \ printf> "${result_file}"
+    {
+        printf 'FAP_USERNAME=%q\n' "${config_user}"
+        printf 'FAP_PASSWORD=%q\n' "${config_pass}"
+        printf 'FAP_PANEL_PORT=%q\n' "${config_port}"
+        printf 'FAP_WEB_BASE_PATH=%q\n' "${config_base_path}"
+        printf 'FAP_ACCESS_URL=%q\n' "${ssl_scheme}://${ssl_host:-SERVER_IP_UNKNOWN}:${config_port}${config_base_path}/"
+        printf 'FAP_DB_TYPE=%q\n' "${config_db}"
+    } > "${result_file}"
     chmod 600 "${result_file}"
     umask "${prev_umask}"
 
@@ -454,6 +485,23 @@ config_after_install() {
     [[ -n "${ssl_host}" ]] && echo -e "${green}Access URL:  ${ssl_scheme}://${ssl_host}:${config_port}${config_base_path}/${plain}"
     echo -e "${green}CLI Command: fastasian${plain}"
     echo -e "${green}═══════════════════════════════════════════${plain}"
+    echo ""
+    echo -e "┌───────────────────────────────────────────────────────┐
+│  ${blue}fastasian control menu usages (subcommands):${plain}           │
+│                                                       │
+│  ${blue}fastasian${plain}              - Admin Management Script      │
+│  ${blue}fastasian start${plain}        - Start                        │
+│  ${blue}fastasian stop${plain}         - Stop                         │
+│  ${blue}fastasian restart${plain}      - Restart                      │
+│  ${blue}fastasian status${plain}       - Current Status               │
+│  ${blue}fastasian settings${plain}     - Current Settings             │
+│  ${blue}fastasian enable${plain}       - Enable Autostart             │
+│  ${blue}fastasian disable${plain}      - Disable Autostart            │
+│  ${blue}fastasian log${plain}          - Check logs                   │
+│  ${blue}fastasian update${plain}       - Update                       │
+│  ${blue}fastasian install${plain}      - Install / Reinstall          │
+│  ${blue}fastasian uninstall${plain}    - Uninstall                    │
+└───────────────────────────────────────────────────────┘"
 }
 
 install_fastasiapanel() {
