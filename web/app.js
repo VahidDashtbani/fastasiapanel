@@ -671,15 +671,16 @@
     }
   }
 
-  function renderRouting() {
+ function renderRouting() {
     topActions.innerHTML = '<div class="top-tools">' +
       '<button class="btn sec" data-act="update-geo">Update GeoIP / GeoSite</button>' +
       '<button class="btn sec" data-act="new-outbound">+ New Outbound</button>' +
       '<button class="btn" data-act="new-rule">+ New Rule</button></div>';
 
-    Promise.all([api('GET', 'outbounds'), api('GET', 'routing')]).then(function (res) {
-      state.outbounds = res[0];
-      state.rules = res[1];
+    Promise.all([api('GET', 'outbounds'), api('GET', 'routing'), api('GET', 'inbounds')]).then(function (res) {
+      state.outbounds = res[0] || [];
+      state.rules = res[1] || [];
+      state.inbounds = res[2] || [];
 
       var html = '<div class="card pad"><h3>One-Click Routing Presets</h3>' +
         '<div class="top-tools">' +
@@ -693,12 +694,14 @@
       if (!state.rules.length) {
         html += '<div class="empty" style="padding:18px">No custom routing rules configured.</div>';
       } else {
-        html += '<div style="overflow-x:auto"><table><thead><tr><th>Status</th><th>Rule Name</th><th>Domains / IPs</th><th>Outbound</th><th>Priority</th><th>Actions</th></tr></thead><tbody>';
+        html += '<div style="overflow-x:auto"><table><thead><tr><th>Status</th><th>Rule Name</th><th>Inbound</th><th>Domains / IPs</th><th>Outbound</th><th>Priority</th><th>Actions</th></tr></thead><tbody>';
         state.rules.forEach(function (r) {
           var conds = [].concat(r.domains || [], r.ips || []).join(', ') || '*';
+          var ibs = (r.inbound_tags && r.inbound_tags.length) ? r.inbound_tags.join(', ') : 'All';
           html += '<tr>' +
             '<td><button class="switch sm ' + (r.enable ? 'on' : '') + '" data-act="toggle-rule" data-rid="' + esc(r.id) + '"></button></td>' +
             '<td><b>' + esc(r.remark || '-') + '</b></td>' +
+            '<td class="ltr"><span class="tag soft">' + esc(ibs) + '</span></td>' +
             '<td class="ltr"><code>' + esc(conds) + '</code></td>' +
             '<td><span class="tag">' + esc(r.outbound_tag) + '</span></td>' +
             '<td class="num">' + r.priority + '</td>' +
@@ -765,14 +768,20 @@
     state.outbounds.forEach(function (o) {
       obOpts += opt(o.tag, o.tag + (o.remark ? ' (' + o.remark + ')' : ''), '');
     });
+    var ibOpts = opt('', 'All Inbounds (Any)', '');
+    (state.inbounds || []).forEach(function (ib) {
+      var label = ib.tag + (ib.remark ? ' (' + ib.remark + ')' : '') + (ib.port ? ' :' + ib.port : '');
+      ibOpts += opt(ib.tag, label, '');
+    });
     var body = '<div class="grid2">' +
       '<label>Rule Name<input name="remark" placeholder="AI Services" required></label>' +
       '<label>Target Outbound<select name="outbound_tag">' + obOpts + '</select></label>' +
+      '<label>Target Inbound<select name="target_inbound">' + ibOpts + '</select></label>' +
+      '<label>Extra Inbound Tags (optional)<input class="ltr" name="inbound_tags" placeholder="vless-in,vmess-in"></label>' +
       '<label class="span2">Domains (comma-separated)<input class="ltr" name="domains" placeholder="geosite:openai,domain:google.com"></label>' +
       '<label class="span2">IPs / CIDRs (comma-separated)<input class="ltr" name="ips" placeholder="geoip:ir,1.1.1.1/32"></label>' +
       '<label>Destination Port (Optional)<input class="ltr" name="port" placeholder="80,443"></label>' +
-      '<label>Inbound Tags (comma-separated, optional)<input class="ltr" name="inbound_tags" placeholder="vless-in,vmess-in"></label>' +
-      '<label class="span2">Priority (lower = higher priority)<input class="ltr" name="priority" type="number" step="1" value="50"></label>' +
+      '<label>Priority (lower = higher priority)<input class="ltr" name="priority" type="number" step="1" value="50"></label>' +
       '</div>';
     openModal('New Routing Rule', body, function (form, setErr) {
       var f = form.elements;
@@ -782,9 +791,15 @@
       };
       var remark = (f.remark.value || '').trim();
       var outboundTag = (f.outbound_tag.value || '').trim();
+      var selectedIb = (f.target_inbound.value || '').trim();
+      var extraIbs = splitList(f.inbound_tags);
+      var inboundTags = [];
+      if (selectedIb) inboundTags.push(selectedIb);
+      extraIbs.forEach(function (t) {
+        if (inboundTags.indexOf(t) === -1) inboundTags.push(t);
+      });
       var domains = splitList(f.domains);
       var ips = splitList(f.ips);
-      var inboundTags = splitList(f.inbound_tags);
       var port = (f.port.value || '').trim();
       var rawPrio = parseInt(f.priority.value, 10);
       var priority = isNaN(rawPrio) ? 50 : rawPrio;
@@ -801,10 +816,10 @@
       api('POST', 'routing', {
         remark: remark,
         outbound_tag: outboundTag,
+        inbound_tags: inboundTags,
         domains: domains,
         ips: ips,
         port: port,
-        inbound_tags: inboundTags,
         priority: priority
       }).then(function () {
         closeModal();
