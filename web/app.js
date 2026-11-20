@@ -11,7 +11,7 @@
     dashboard: 'Dashboard',
     inbounds: 'Inbounds',
     clients: 'Clients',
-    routing: 'Routing & Outbounds',
+    routing: 'Routing Rules',
     quotas: 'Quota Groups',
     nodes: 'Nodes & API',
     logs: 'Logs & Xray Config',
@@ -1038,41 +1038,119 @@
 
   function drawQR(canvas, text) {
     var ctx = canvas.getContext('2d');
-    var size = 210;
-    canvas.width = size;
-    canvas.height = size;
+    var payload = String(text || '');
+    var bytes = [];
+    for (var i = 0; i < payload.length; i++) {
+      var code = payload.charCodeAt(i);
+      if (code < 0x80) bytes.push(code);
+      else if (code < 0x800) {
+        bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+      } else {
+        bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+      }
+    }
+    var ver = bytes.length <= 17 ? 1 : bytes.length <= 32 ? 2 : bytes.length <= 53 ? 3 : bytes.length <= 78 ? 4 : bytes.length <= 106 ? 5 : 6;
+    var n = ver * 4 + 17;
+    var size = 224;
+    var quiet = 4;
+    var cell = Math.max(2, Math.floor(size / (n + quiet * 2)));
+    canvas.width = n * cell + quiet * cell * 2;
+    canvas.height = canvas.width;
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, size, size);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    var modules = 29;
-    var cell = Math.floor(size / (modules + 4));
-    var off = Math.floor((size - modules * cell) / 2);
-    ctx.fillStyle = '#000000';
+    var grid = Array.from({ length: n }, function () { return Array(n).fill(null); });
+    var isFunc = Array.from({ length: n }, function () { return Array(n).fill(false); });
 
-    function finder(rx, ry) {
-      for (var y = 0; y < 7; y++) {
-        for (var x = 0; x < 7; x++) {
-          if (x === 0 || x === 6 || y === 0 || y === 6 || (x >= 2 && x <= 4 && y >= 2 && y <= 4)) {
-            ctx.fillRect(off + (rx + x) * cell, off + (ry + y) * cell, cell, cell);
+    function setMod(x, y, val, func) {
+      if (x < 0 || y < 0 || x >= n || y >= n) return;
+      grid[y][x] = !!val;
+      if (func) isFunc[y][x] = true;
+    }
+    function finder(cx, cy) {
+      for (var dy = -4; dy <= 4; dy++) {
+        for (var dx = -4; dx <= 4; dx++) {
+          var ax = Math.max(dx, -dx), ay = Math.max(dy, -dy);
+          var m = Math.max(ax, ay);
+          if (m <= 4) {
+            var dark = (m <= 1) || (m === 3);
+            setMod(cx + dx, cy + dy, dark, true);
           }
         }
       }
     }
-    finder(0, 0);
-    finder(modules - 7, 0);
-    finder(0, modules - 7);
-
-    var hash = 2166136261;
-    for (var i = 0; i < text.length; i++) {
-      hash ^= text.charCodeAt(i);
-      hash = Math.imul(hash, 16777619);
+    finder(3, 3);
+    finder(n - 4, 3);
+    finder(3, n - 4);
+    for (var i = 8; i < n - 8; i++) {
+      setMod(i, 6, i % 2 === 0, true);
+      setMod(6, i, i % 2 === 0, true);
     }
-    for (var y = 0; y < modules; y++) {
-      for (var x = 0; x < modules; x++) {
-        if ((x < 8 && y < 8) || (x >= modules - 8 && y < 8) || (x < 8 && y >= modules - 8)) continue;
-        var idx = (y * modules + x) % Math.max(1, text.length);
-        var bit = ((text.charCodeAt(idx) + x * 17 + y * 31 + (hash >>> (x % 16))) & 1) === 1;
-        if (bit) ctx.fillRect(off + x * cell, off + y * cell, cell, cell);
+    if (ver >= 2) {
+      var ap = n - 7;
+      for (var dy = -2; dy <= 2; dy++) {
+        for (var dx = -2; dx <= 2; dx++) {
+          var d = Math.max(Math.abs(dx), Math.abs(dy)) !== 1;
+          setMod(ap + dx, ap + dy, d, true);
+        }
+      }
+    }
+    setMod(8, n - 8, true, true);
+
+    var bits = [0, 1, 0, 0];
+    var lenBits = ver <= 9 ? 8 : 16;
+    var lenVal = Math.min(bytes.length, (1 << lenBits) - 1);
+    for (var b = lenBits - 1; b >= 0; b--) bits.push((lenVal >> b) & 1);
+    for (var i = 0; i < bytes.length; i++) {
+      for (var b = 7; b >= 0; b--) bits.push((bytes[i] >> b) & 1);
+    }
+    var capBits = ver === 1 ? 152 : ver === 2 ? 272 : ver === 3 ? 440 : ver === 4 ? 640 : ver === 5 ? 864 : 1088;
+    for (var p = 0; p < 4 && bits.length < capBits; p++) bits.push(0);
+    while (bits.length % 8 !== 0) bits.push(0);
+    var pads = [0xec, 0x11];
+    var pi = 0;
+    while (bits.length < capBits) {
+      var pv = pads[pi++ % 2];
+      for (var b = 7; b >= 0 && bits.length < capBits; b--) bits.push((pv >> b) & 1);
+    }
+
+    var bitIdx = 0;
+    var up = true;
+    for (var x = n - 1; x > 0; x -= 2) {
+      if (x === 6) x = 5;
+      for (var step = 0; step < n; step++) {
+        var y = up ? (n - 1 - step) : step;
+        for (var c = 0; c < 2; c++) {
+          var xx = x - c;
+          if (!isFunc[y][xx]) {
+            var bit = bitIdx < bits.length ? bits[bitIdx++] : 0;
+            var masked = ((x + y) % 2 === 0) ? (bit ^ 1) : bit;
+            setMod(xx, y, masked === 1, false);
+          }
+        }
+      }
+      up = !up;
+    }
+
+    // Format info (EC level L = 01, mask 0 = 000) -> 0x77c0
+    var fmt = 0x77c0;
+    for (var i = 0; i < 15; i++) {
+      var fbit = ((fmt >> (14 - i)) & 1) === 1;
+      if (i < 6) setMod(8, i, fbit, true);
+      else if (i < 8) setMod(8, i + 1, fbit, true);
+      else if (i === 8) setMod(7, 8, fbit, true);
+      else setMod(14 - i, 8, fbit, true);
+
+      if (i < 8) setMod(n - 1 - i, 8, fbit, true);
+      else setMod(8, n - 15 + i, fbit, true);
+    }
+
+    ctx.fillStyle = '#0f172a';
+    for (var y = 0; y < n; y++) {
+      for (var x = 0; x < n; x++) {
+        if (grid[y][x]) {
+          ctx.fillRect((x + quiet) * cell, (y + quiet) * cell, cell, cell);
+        }
       }
     }
   }
@@ -1360,3 +1438,89 @@
 
   go('dashboard');
 })();
+
+  function renderOutboundsSection(targetEl) {
+    if (!targetEl) return;
+    var list = (state && state.outbounds) || [];
+    var rows = list.map(function (o) {
+      return '<tr>' +
+        '<td><b>' + esc(o.tag || '') + '</b></td>' +
+        '<td><span class="tag soft">' + esc((o.protocol || '').toUpperCase()) + '</span></td>' +
+        '<td>' + esc((o.address || '') + (o.port ? ':' + o.port : '')) + '</td>' +
+        '<td>' + esc(o.relay_tag || '-') + '</td>' +
+        '<td>' + esc(o.remark || '') + '</td>' +
+        '</tr>';
+    }).join('');
+    var section = document.createElement('div');
+    section.className = 'card separated-outbounds-card';
+    section.style.marginTop = '18px';
+    section.innerHTML =
+      '<div class="card-head" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">' +
+        '<div><h3 style="margin:0">Outbounds (Dedicated Section)</h3><small style="opacity:0.75">Manage outbound protocols, relay chains & transport streams independently</small></div>' +
+        '<span class="tag soft">' + list.length + ' Outbounds</span>' +
+      '</div>' +
+      '<div class="table-wrap"><table><thead><tr>' +
+        '<th>Tag</th><th>Protocol</th><th>Endpoint</th><th>Relay</th><th>Remark</th>' +
+      '</tr></thead><tbody>' + (rows || '<tr><td colspan="5" style="text-align:center;opacity:0.7">No outbounds configured yet</td></tr>') + '</tbody></table></div>';
+    targetEl.appendChild(section);
+  }
+
+
+  var liveTrafficEnabled = true;
+  var liveTrafficTimer = null;
+
+  function ensureLiveTrafficBadge() {
+    var host = document.querySelector('#clientsView, .clients-section, main, .content') || document.body;
+    if (!host || document.getElementById('fapLiveTrafficBar')) return;
+    var bar = document.createElement('div');
+    bar.id = 'fapLiveTrafficBar';
+    bar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;margin-bottom:12px;border-radius:14px;background:rgba(15,23,42,0.52);backdrop-filter:blur(14px);border:1px solid rgba(125,211,252,0.22);font-size:12.5px;';
+    bar.innerHTML =
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<span id="fapLiveDot" style="width:9px;height:9px;border-radius:50%;background:#10b981;box-shadow:0 0 10px #10b981;display:inline-block;"></span>' +
+        '<b>Live Client Traffic</b>' +
+        '<span id="fapLiveStamp" style="opacity:0.72;">Syncing every 3s...</span>' +
+      '</div>' +
+      '<button type="button" class="btn sm" id="fapToggleLiveBtn">' + (liveTrafficEnabled ? 'Live: ON' : 'Live: OFF') + '</button>';
+    host.prepend(bar);
+
+    var btn = document.getElementById('fapToggleLiveBtn');
+    if (btn) {
+      btn.onclick = function () {
+        liveTrafficEnabled = !liveTrafficEnabled;
+        btn.textContent = liveTrafficEnabled ? 'Live: ON' : 'Live: OFF';
+        var dot = document.getElementById('fapLiveDot');
+        if (dot) {
+          dot.style.background = liveTrafficEnabled ? '#10b981' : '#f59e0b';
+          dot.style.boxShadow = liveTrafficEnabled ? '0 0 10px #10b981' : 'none';
+        }
+      };
+    }
+  }
+
+  function refreshLiveClientsTraffic() {
+    if (!liveTrafficEnabled) return;
+    var active = document.querySelector('[data-page="clients"].active, #clientsView:not(.hidden)');
+    var onClients = !!active || /client/i.test(window.location.hash || '') || !!document.querySelector('[data-act="toggle-client"]');
+    if (!onClients) return;
+    ensureLiveTrafficBadge();
+    if (typeof api === 'function') {
+      api('GET', 'inbounds').then(function (res) {
+        if (!Array.isArray(res) || typeof state === 'undefined') return;
+        state.inbounds = res;
+        if (typeof renderClients === 'function') {
+          renderClients(true);
+        }
+        var stamp = document.getElementById('fapLiveStamp');
+        if (stamp) {
+          var now = new Date();
+          stamp.textContent = 'Updated ' + now.toLocaleTimeString();
+        }
+      }).catch(function () {});
+    }
+  }
+
+  if (!liveTrafficTimer) {
+    liveTrafficTimer = setInterval(refreshLiveClientsTraffic, 3000);
+    setTimeout(refreshLiveClientsTraffic, 800);
+  }

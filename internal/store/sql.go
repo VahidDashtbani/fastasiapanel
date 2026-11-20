@@ -35,6 +35,27 @@ var schema = []string{
 	`CREATE INDEX IF NOT EXISTS idx_clients_inbound ON clients (inbound_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_clients_sub_id ON clients (sub_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_clients_email ON clients (email)`,
+	`CREATE TABLE IF NOT EXISTS outbounds (
+		id TEXT PRIMARY KEY, tag TEXT NOT NULL, remark TEXT NOT NULL, protocol TEXT NOT NULL,
+		address TEXT NOT NULL DEFAULT '', port BIGINT NOT NULL DEFAULT 0,
+		username TEXT NOT NULL DEFAULT '', password TEXT NOT NULL DEFAULT '',
+		relay_tag TEXT NOT NULL DEFAULT '', stream_json TEXT NOT NULL DEFAULT 'null',
+		settings TEXT NOT NULL DEFAULT 'null', enable BIGINT NOT NULL DEFAULT 1)`,
+	`CREATE TABLE IF NOT EXISTS routing_rules (
+		id TEXT PRIMARY KEY, remark TEXT NOT NULL DEFAULT '', outbound_tag TEXT NOT NULL,
+		inbound_tags TEXT NOT NULL DEFAULT '[]', domains TEXT NOT NULL DEFAULT '[]',
+		ips TEXT NOT NULL DEFAULT '[]', port TEXT NOT NULL DEFAULT '',
+		network TEXT NOT NULL DEFAULT '', protocol TEXT NOT NULL DEFAULT '[]',
+		priority BIGINT NOT NULL DEFAULT 0, enable BIGINT NOT NULL DEFAULT 1)`,
+	`CREATE TABLE IF NOT EXISTS quota_groups (
+		id TEXT PRIMARY KEY, name TEXT NOT NULL, total_bytes BIGINT NOT NULL DEFAULT 0,
+		enable BIGINT NOT NULL DEFAULT 1)`,
+	`CREATE TABLE IF NOT EXISTS nodes (
+		id TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL,
+		token TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '')`,
+	`CREATE TABLE IF NOT EXISTS api_tokens (
+		id TEXT PRIMARY KEY, name TEXT NOT NULL, token TEXT NOT NULL,
+		scope TEXT NOT NULL DEFAULT '', expires_at BIGINT NOT NULL DEFAULT 0)`,
 	`CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`,
 }
@@ -56,6 +77,7 @@ var migrations = []string{
 	`ALTER TABLE clients ADD COLUMN limit_ip BIGINT NOT NULL DEFAULT 0`,
 	`ALTER TABLE clients ADD COLUMN reset_days BIGINT NOT NULL DEFAULT 0`,
 	`ALTER TABLE clients ADD COLUMN last_reset_at BIGINT NOT NULL DEFAULT 0`,
+	`ALTER TABLE clients ADD COLUMN quota_group TEXT NOT NULL DEFAULT ''`,
 }
 
 const (
@@ -70,10 +92,10 @@ const (
 		raw=excluded.raw, created_at=excluded.created_at, updated_at=excluded.updated_at`
 
 	upsertClient = `INSERT INTO clients (
-		id, inbound_id, email, config, uuid, password, flow, sub_id, tg_id, comment,
+		id, inbound_id, email, config, uuid, password, flow, sub_id, tg_id, quota_group, comment,
 		enable, total_bytes, expiry_at, first_seen_at, limit_ip, reset_days, last_reset_at,
 		up, down, created_at
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (id) DO UPDATE SET
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (id) DO UPDATE SET
 		inbound_id=excluded.inbound_id, email=excluded.email, config=excluded.config, uuid=excluded.uuid,
 		password=excluded.password, flow=excluded.flow, sub_id=excluded.sub_id, tg_id=excluded.tg_id,
 		comment=excluded.comment, enable=excluded.enable, total_bytes=excluded.total_bytes,
@@ -82,6 +104,36 @@ const (
 		up=excluded.up, down=excluded.down, created_at=excluded.created_at`
 
 	upsertSetting = `INSERT INTO settings (k, v) VALUES (?,?) ON CONFLICT (k) DO UPDATE SET v=excluded.v`
+
+	upsertOutbound = `INSERT INTO outbounds (
+		id, tag, remark, protocol, address, port, username, password, relay_tag, stream_json, settings, enable
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (id) DO UPDATE SET
+		tag=excluded.tag, remark=excluded.remark, protocol=excluded.protocol, address=excluded.address,
+		port=excluded.port, username=excluded.username, password=excluded.password, relay_tag=excluded.relay_tag,
+		stream_json=excluded.stream_json, settings=excluded.settings, enable=excluded.enable`
+
+	upsertRoutingRule = `INSERT INTO routing_rules (
+		id, remark, outbound_tag, inbound_tags, domains, ips, port, network, protocol, priority, enable
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (id) DO UPDATE SET
+		remark=excluded.remark, outbound_tag=excluded.outbound_tag, inbound_tags=excluded.inbound_tags,
+		domains=excluded.domains, ips=excluded.ips, port=excluded.port, network=excluded.network,
+		protocol=excluded.protocol, priority=excluded.priority, enable=excluded.enable`
+
+	upsertQuotaGroup = `INSERT INTO quota_groups (
+		id, name, total_bytes, enable
+	) VALUES (?,?,?,?) ON CONFLICT (id) DO UPDATE SET
+		name=excluded.name, total_bytes=excluded.total_bytes, enable=excluded.enable`
+
+	upsertNode = `INSERT INTO nodes (
+		id, name, address, token, status
+	) VALUES (?,?,?,?,?) ON CONFLICT (id) DO UPDATE SET
+		name=excluded.name, address=excluded.address, token=excluded.token, status=excluded.status`
+
+	upsertAPIToken = `INSERT INTO api_tokens (
+		id, name, token, scope, expires_at
+	) VALUES (?,?,?,?,?) ON CONFLICT (id) DO UPDATE SET
+		name=excluded.name, token=excluded.token, scope=excluded.scope, expires_at=excluded.expires_at`
+
 	upsertMeta    = `INSERT INTO meta (k, v) VALUES (?,?) ON CONFLICT (k) DO UPDATE SET v=excluded.v`
 	insertMeta    = `INSERT INTO meta (k, v) VALUES (?,?) ON CONFLICT (k) DO NOTHING`
 )
@@ -222,13 +274,13 @@ func (b *sqlBackend) Load() (State, error) {
 	if err != nil {
 		return st, err
 	}
-	err = b.each(`SELECT id, inbound_id, email, config, uuid, password, flow, sub_id, tg_id, comment, enable, total_bytes, expiry_at, first_seen_at, limit_ip, reset_days, last_reset_at, up, down, created_at FROM clients ORDER BY created_at, id`,
+	err = b.each(`SELECT id, inbound_id, email, config, uuid, password, flow, sub_id, tg_id, quota_group, comment, enable, total_bytes, expiry_at, first_seen_at, limit_ip, reset_days, last_reset_at, up, down, created_at FROM clients ORDER BY created_at, id`,
 		func(r *sql.Rows) error {
 			var c Client
 			var en, limitIP, resetDays int64
 			var cfg, ca string
 			if err := r.Scan(
-				&c.ID, &c.InboundID, &c.Email, &cfg, &c.UUID, &c.Password, &c.Flow, &c.SubID, &c.TgID, &c.Comment,
+				&c.ID, &c.InboundID, &c.Email, &cfg, &c.UUID, &c.Password, &c.Flow, &c.SubID, &c.TgID, &c.QuotaGroup, &c.Comment,
 				&en, &c.TotalBytes, &c.ExpiryAt, &c.FirstSeenAt, &limitIP, &resetDays, &c.LastResetAt,
 				&c.Up, &c.Down, &ca,
 			); err != nil {
@@ -243,6 +295,86 @@ func (b *sqlBackend) Load() (State, error) {
 	if err != nil {
 		return st, err
 	}
+	err = b.each(`SELECT id, tag, remark, protocol, address, port, username, password, relay_tag, stream_json, settings, enable FROM outbounds ORDER BY tag, id`,
+		func(r *sql.Rows) error {
+			var o Outbound
+			var port, en int64
+			var streamStr, setStr string
+			if err := r.Scan(&o.ID, &o.Tag, &o.Remark, &o.Protocol, &o.Address, &port, &o.Username, &o.Password, &o.RelayTag, &streamStr, &setStr, &en); err != nil {
+				return err
+			}
+			o.Port, o.Enable = int(port), en != 0
+			o.Settings = decRaw(setStr)
+			if streamStr != "" && streamStr != "null" {
+				var strm OutboundStream
+				if err := json.Unmarshal([]byte(streamStr), &strm); err == nil {
+					o.Stream = &strm
+				}
+			}
+			st.Outbounds = append(st.Outbounds, o)
+			return nil
+		})
+	if err != nil {
+		return st, err
+	}
+	err = b.each(`SELECT id, remark, outbound_tag, inbound_tags, domains, ips, port, network, protocol, priority, enable FROM routing_rules ORDER BY priority, id`,
+		func(r *sql.Rows) error {
+			var rr RoutingRule
+			var prio, en int64
+			var ibRaw, domRaw, ipRaw, protoRaw string
+			if err := r.Scan(&rr.ID, &rr.Remark, &rr.OutboundTag, &ibRaw, &domRaw, &ipRaw, &rr.Port, &rr.Network, &protoRaw, &prio, &en); err != nil {
+				return err
+			}
+			rr.Priority, rr.Enable = int(prio), en != 0
+			_ = json.Unmarshal([]byte(ibRaw), &rr.InboundTags)
+			_ = json.Unmarshal([]byte(domRaw), &rr.Domains)
+			_ = json.Unmarshal([]byte(ipRaw), &rr.IPs)
+			_ = json.Unmarshal([]byte(protoRaw), &rr.Protocol)
+			st.RoutingRules = append(st.RoutingRules, rr)
+			return nil
+		})
+	if err != nil {
+		return st, err
+	}
+	err = b.each(`SELECT id, name, total_bytes, enable FROM quota_groups ORDER BY name, id`,
+		func(r *sql.Rows) error {
+			var q QuotaGroup
+			var en int64
+			if err := r.Scan(&q.ID, &q.Name, &q.TotalBytes, &en); err != nil {
+				return err
+			}
+			q.Enable = en != 0
+			st.QuotaGroups = append(st.QuotaGroups, q)
+			return nil
+		})
+	if err != nil {
+		return st, err
+	}
+	err = b.each(`SELECT id, name, address, token, status FROM nodes ORDER BY name, id`,
+		func(r *sql.Rows) error {
+			var n Node
+			if err := r.Scan(&n.ID, &n.Name, &n.Address, &n.Token, &n.Status); err != nil {
+				return err
+			}
+			st.Nodes = append(st.Nodes, n)
+			return nil
+		})
+	if err != nil {
+		return st, err
+	}
+	err = b.each(`SELECT id, name, token, scope, expires_at FROM api_tokens ORDER BY name, id`,
+		func(r *sql.Rows) error {
+			var t APIToken
+			if err := r.Scan(&t.ID, &t.Name, &t.Token, &t.Scope, &t.ExpiresAt); err != nil {
+				return err
+			}
+			st.APITokens = append(st.APITokens, t)
+			return nil
+		})
+	if err != nil {
+		return st, err
+	}
+
 	st.Settings = map[string]string{}
 	err = b.each(`SELECT k, v FROM settings`, func(r *sql.Rows) error {
 		var k, v string
@@ -323,10 +455,57 @@ func (b *sqlBackend) Save(prev, next State) error {
 	err = diff(prev.Clients, next.Clients, func(c Client) string { return c.ID },
 		func(c Client) error {
 			return exec(upsertClient, c.ID, c.InboundID, c.Email, encRaw(c.Config), c.UUID, c.Password, c.Flow,
-				c.SubID, c.TgID, c.Comment, flag(c.Enable), c.TotalBytes, c.ExpiryAt, c.FirstSeenAt,
+				c.SubID, c.TgID, c.QuotaGroup, c.Comment, flag(c.Enable), c.TotalBytes, c.ExpiryAt, c.FirstSeenAt,
 				int64(c.LimitIP), int64(c.Reset), c.LastResetAt, c.Up, c.Down, encTime(c.CreatedAt))
 		},
 		func(id string) error { return exec(`DELETE FROM clients WHERE id = ?`, id) })
+	if err != nil {
+		return err
+	}
+
+	err = diff(prev.Outbounds, next.Outbounds, func(o Outbound) string { return o.ID },
+		func(o Outbound) error {
+			strmBytes, _ := json.Marshal(o.Stream)
+			if o.Stream == nil {
+				strmBytes = []byte("null")
+			}
+			return exec(upsertOutbound, o.ID, o.Tag, o.Remark, o.Protocol, o.Address, int64(o.Port), o.Username, o.Password, o.RelayTag, string(strmBytes), encRaw(o.Settings), flag(o.Enable))
+		},
+		func(id string) error { return exec(`DELETE FROM outbounds WHERE id = ?`, id) })
+	if err != nil {
+		return err
+	}
+
+	err = diff(prev.RoutingRules, next.RoutingRules, func(r RoutingRule) string { return r.ID },
+		func(r RoutingRule) error {
+			ibB, _ := json.Marshal(r.InboundTags)
+			domB, _ := json.Marshal(r.Domains)
+			ipB, _ := json.Marshal(r.IPs)
+			proB, _ := json.Marshal(r.Protocol)
+			return exec(upsertRoutingRule, r.ID, r.Remark, r.OutboundTag, string(ibB), string(domB), string(ipB), r.Port, r.Network, string(proB), int64(r.Priority), flag(r.Enable))
+		},
+		func(id string) error { return exec(`DELETE FROM routing_rules WHERE id = ?`, id) })
+	if err != nil {
+		return err
+	}
+
+	err = diff(prev.QuotaGroups, next.QuotaGroups, func(q QuotaGroup) string { return q.ID },
+		func(q QuotaGroup) error { return exec(upsertQuotaGroup, q.ID, q.Name, q.TotalBytes, flag(q.Enable)) },
+		func(id string) error { return exec(`DELETE FROM quota_groups WHERE id = ?`, id) })
+	if err != nil {
+		return err
+	}
+
+	err = diff(prev.Nodes, next.Nodes, func(n Node) string { return n.ID },
+		func(n Node) error { return exec(upsertNode, n.ID, n.Name, n.Address, n.Token, n.Status) },
+		func(id string) error { return exec(`DELETE FROM nodes WHERE id = ?`, id) })
+	if err != nil {
+		return err
+	}
+
+	err = diff(prev.APITokens, next.APITokens, func(t APIToken) string { return t.ID },
+		func(t APIToken) error { return exec(upsertAPIToken, t.ID, t.Name, t.Token, t.Scope, t.ExpiresAt) },
+		func(id string) error { return exec(`DELETE FROM api_tokens WHERE id = ?`, id) })
 	if err != nil {
 		return err
 	}

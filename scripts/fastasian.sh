@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -u
+if [[ -n "${TERM:-}" ]] && ! infocmp "${TERM}" >/dev/null 2>&1; then
+  export TERM="xterm-256color"
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -12,7 +15,8 @@ NC='\033[0m'
 [[ $EUID -ne 0 ]] && exec sudo "$0" "$@"
 
 CONF_DIR="/etc/fastasiapanel"
-ENV_FILE="${CONF_DIR}/panel.env"
+ENV_FILE="${CONF_DIR}/fastasiapanel.env"
+[[ -f "${ENV_FILE}" ]] || ENV_FILE="${CONF_DIR}/panel.env"
 DATA_DIR="/var/lib/fastasiapanel"
 APP_DIR="/opt/fastasiapanel"
 BIN_PATH="/usr/local/bin/fastasiapanel"
@@ -262,9 +266,14 @@ show_settings() {
   load_env
   local ip
   ip=$(server_ip)
-  local port="${FAP_PORT:-2053}"
-  local base="${FAP_BASE_PATH:-}"
-  local db="${FAP_DB:-sqlite}"
+  local port="${FAP_PORT:-}"
+  if [[ -z "${port}" && -n "${FAP_LISTEN:-}" ]]; then
+    port="${FAP_LISTEN##*:}"
+  fi
+  port="${port:-2053}"
+  local base="${FAP_BASE_PATH:-/}"
+  [[ -z "${base}" ]] && base="/"
+  local db="${FAP_DB_TYPE:-${FAP_DB:-sqlite}}"
   local user="${FAP_ADMIN_USER:-admin}"
   local pass="${FAP_ADMIN_PASS:-********}"
 
@@ -279,10 +288,10 @@ show_settings() {
   echo -e "  Database Type  : ${YELLOW}${db}${NC}"
   if [[ "${db}" == "postgres" ]]; then
     local safe_dsn
-    safe_dsn=$(printf '%s' "${FAP_PG_DSN:-}" | sed -E 's|(://[^:/@]+:)[^@]+@|\1****@|')
+    safe_dsn=$(printf '%s' "${FAP_DB_DSN:-${FAP_PG_DSN:-}}" | sed -E 's|(://[^:/@]+:)[^@]+@|\1****@|')
     echo -e "  Postgres DSN   : ${YELLOW}${safe_dsn:-not set}${NC}"
   else
-    echo -e "  SQLite File    : ${YELLOW}${FAP_DATA:-${DATA_DIR}/fastasiapanel.db}${NC}"
+    echo -e "  SQLite File    : ${YELLOW}${FAP_DB_PATH:-/etc/fastasiapanel/fastasiapanel.db}${NC}"
   fi
   echo -e "  Admin Username : ${YELLOW}${user}${NC}"
   echo -e "  Admin Password : ${YELLOW}${pass}${NC}"
@@ -360,8 +369,12 @@ update_panel() {
     LOGW "Update cancelled."
     return 0
   fi
-  LOGI "Running installer from GitHub..."
-  bash <(curl -fsSL "${INSTALL_URL}?v=$(date +%s)")
+  LOGI "Downloading latest installer and updating FastAsiaPanel..."
+  local tmp_ins="/tmp/fastasia-install.$$.sh"
+  curl -fsSL "${INSTALL_URL}?v=$(date +%s)" -o "${tmp_ins}"
+  NON_INTERACTIVE=1 bash "${tmp_ins}"
+  rm -f "${tmp_ins}"
+  systemctl restart "${SERVICE_NAME}" || true
 }
 
 update_cli_script() {
@@ -689,9 +702,14 @@ show_menu() {
   while true; do
     clear
     load_env
-    local port="${FAP_PORT:-2053}"
-    local db="${FAP_DB:-sqlite}"
+    local port="${FAP_PORT:-}"
+    if [[ -z "${port}" && -n "${FAP_LISTEN:-}" ]]; then
+      port="${FAP_LISTEN##*:}"
+    fi
+    port="${port:-2053}"
+    local db="${FAP_DB_TYPE:-${FAP_DB:-sqlite}}"
     local base="${FAP_BASE_PATH:-/}"
+    [[ -z "${base}" ]] && base="/"
     echo -e "${CYAN}┌────────────────────────────────────────────────────────────┐${NC}"
     echo -e "${CYAN}│${NC}  ${BOLD}FastAsiaPanel Management Menu${NC}                             ${CYAN}│${NC}"
     echo -e "${CYAN}├────────────────────────────────────────────────────────────┤${NC}"

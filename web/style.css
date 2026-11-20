@@ -159,3 +159,125 @@ input.ltr, .ltr { direction: ltr; text-align: left; }
   .main { padding: 16px 14px 32px; }
   .grid2 { grid-template-columns: 1fr; }
 }
+
+/* FastAsiaPanel Glassmorphism UI Polish */
+:root {
+  --glass-bg: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(255, 255, 255, 0.18);
+  --glass-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
+}
+
+.card, .panel, .modal-content, .box, .stat-card {
+  background: var(--glass-bg) !important;
+  backdrop-filter: blur(16px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(150%) !important;
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: var(--glass-shadow) !important;
+  border-radius: 16px !important;
+}
+
+.btn, button {
+  backdrop-filter: blur(8px);
+  border-radius: 10px;
+  transition: transform 0.16s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.btn:hover, button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+}
+
+input, select, textarea {
+  background: rgba(255, 255, 255, 0.06) !important;
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  border-radius: 10px !important;
+}
+
+
+/* =========================================================
+   FastAsiaPanel - Signature Aurora Glassmorphism UI/UX
+   ========================================================= */
+:root {
+  --bg-deep: #070b14;
+  --aurora-1: rgba(56, 189, 248, 0.16);
+  --aurora-2: rgba(168, 85, 247, 0.15);
+  --aurora-3: rgba(16, 185, 129, 0.12);
+  --glass-surface: rgba(15, 23, 42, 0.56);
+  --glass-surface-strong: rgba(20, 30, 56, 0.74);
+  --glass-border: rgba(255, 255, 255, 0.14);
+  --glass-border-bright: rgba(125, 211, 252, 0.36);
+  --glass-glow: 0 20px 50px rgba(2, 8, 23, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+body {
+  background-color: var(--bg-deep) !important;
+  background-image:
+    radial-gradient(circle at 12% 15%, var(--aurora-1), transparent 42%),
+    radial-gradient(circle at 86% 18%, var(--aurora-2), transparent 45%),
+    radial-gradient(circle at 50% 88%, var(--aurora-3), transparent 48%) !important;
+  background-attachment: fixed !important;
+}
+
+.sidebar, aside, nav.sidebar, .nav-panel,
+.topbar, header, .header-bar,
+.card, .panel, .box, .stat-card, .table-wrap, .modal-content, .modal-card, .dialog {
+  background: var(--glass-surface) !important;
+  backdrop-filter: blur(22px) saturate(165%) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(165%) !important;
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: var(--glass-glow) !important;
+  border-radius: 18px !important;
+}
+
+.modal-content, .modal-card, .dialog {
+  background: var(--glass-surface-strong) !important;
+  border-color: var(--glass-border-bright) !important;
+}
+
+.nav-item.active, .menu-item.active, .tab.active, a.active {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.22), rgba(168, 85, 247, 0.18)) !important;
+  border: 1px solid rgba(125, 211, 252, 0.35) !important;
+  box-shadow: 0 8px 24px rgba(14, 165, 233, 0.18) !important;
+}
+
+table {
+  border-collapse: separate !important;
+  border-spacing: 0 6px !important;
+}
+
+tbody tr {
+  background: rgba(255, 255, 255, 0.03) !important;
+  transition: transform 0.18s ease, background 0.2s ease !important;
+}
+
+tbody tr:hover {
+  background: rgba(125, 211, 252, 0.08) !important;
+  transform: translateY(-1px);
+}
+
+.btn, button, .icon-btn, .tag, .badge {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: transform 0.16s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.btn:hover, button:hover, .icon-btn:hover {
+  transform: translateY(-1px);
+  border-color: var(--glass-border-bright) !important;
+  box-shadow: 0 10px 24px rgba(2, 132, 199, 0.22);
+}
+
+input, select, textarea {
+  background: rgba(9, 14, 28, 0.55) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 12px !important;
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none !important;
+  border-color: rgba(56, 189, 248, 0.65) !important;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.16) !important;
+}

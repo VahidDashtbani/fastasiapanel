@@ -159,18 +159,23 @@ func (a *App) subBaseURL(r *http.Request) string {
 		return strings.TrimRight(custom, "/")
 	}
 	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" || a.cfg.SecureCookies {
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") || a.cfg.SecureCookies {
 		scheme = "https"
 	}
-	host := r.Host
-	if a.cfg.PublicHost != "" {
-		if _, port, err := net.SplitHostPort(r.Host); err == nil && port != "" {
-			host = net.JoinHostPort(a.cfg.PublicHost, port)
-		} else {
-			host = a.cfg.PublicHost
+	host := strings.TrimSpace(a.host(r))
+	if _, reqPort, err := net.SplitHostPort(strings.TrimSpace(r.Host)); err == nil && reqPort != "" {
+		if _, _, err := net.SplitHostPort(host); err != nil {
+			host = net.JoinHostPort(host, reqPort)
+		}
+	} else if _, _, err := net.SplitHostPort(host); err != nil && strings.Contains(a.cfg.Listen, ":") {
+		parts := strings.Split(a.cfg.Listen, ":")
+		listenPort := parts[len(parts)-1]
+		if listenPort != "" && listenPort != "80" && listenPort != "443" {
+			host = net.JoinHostPort(host, listenPort)
 		}
 	}
-	return fmt.Sprintf("%s://%s%s/sub", scheme, host, a.cfg.BasePath)
+	base := strings.TrimRight(strings.TrimSpace(a.cfg.BasePath), "/")
+	return fmt.Sprintf("%s://%s%s/sub", scheme, host, base)
 }
 
 func (a *App) secure(next http.Handler) http.Handler {

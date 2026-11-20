@@ -228,7 +228,10 @@ func New(b Backend) (*Store, error) {
 }
 
 func Open(path string) (*Store, error) {
-	return New(&jsonBackend{path: path})
+	if strings.HasSuffix(strings.ToLower(path), ".json") {
+		return New(&jsonBackend{path: path})
+	}
+	return OpenSQL("sqlite", SQLiteDSN(path))
 }
 
 func (s *Store) Close() error {

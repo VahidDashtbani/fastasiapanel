@@ -401,15 +401,15 @@ apply_panel_settings() {
         go_base_path="${WEB_BASE_PATH}"
     fi
 
-    local db_type_val="json"
-    local db_path_val="${CONFIG_DIR}/fastasiapanel.json"
+    local db_type_val="sqlite"
+    local db_path_val="${CONFIG_DIR}/fastasiapanel.db"
     local db_dsn_val=""
     if [[ "${DB_TYPE:-sqlite}" == "postgres" && -n "${DB_DSN:-}" ]]; then
         db_type_val="postgres"
         db_dsn_val="${DB_DSN}"
     elif [[ "${DB_TYPE:-}" == "sqlite" || "${DB_TYPE:-}" == "json" ]]; then
         db_type_val="${DB_TYPE}"
-        db_path_val="${DB_DSN:-${CONFIG_DIR}/fastasiapanel.json}"
+        db_path_val="${DB_DSN:-${CONFIG_DIR}/fastasiapanel.db}"
     fi
 
     local public_host_val="${SERVER_IP}"
