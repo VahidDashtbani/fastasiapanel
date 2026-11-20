@@ -1,40 +1,30 @@
 #!/bin/bash
-# FastAsiaPanel installer (modeled on the 3x-ui install.sh pattern)
-#
 # Usage:
 #   bash install.sh            # latest release
 #   bash install.sh v1.0.0     # specific tag
 #
-# Optional env vars (also work with `bash <(curl -Ls ...)`):
-#   FAP_REPO                     GitHub "owner/repo" (default: VahidDashtbani/fastasiapanel)
-#   FAP_PORT                     panel port (default: random free port)
-#   FAP_USERNAME                 admin username (default: random)
-#   FAP_PASSWORD                 admin password (default: random)
-#   FAP_BASE_PATH                web base path (default: random)
+# Optional env vars (also work with `curl ... | bash`):
+#   FAP_REPO            GitHub "owner/repo"         (REQUIRED: set below or via env)
+#   FAP_PORT            panel port                  (default: random free port)
+#   FAP_USERNAME        admin username              (default: random)
+#   FAP_PASSWORD        admin password              (default: random)
+#   FAP_BASE_PATH       web base path               (default: random)
 #   FAP_TLS_CERT / FAP_TLS_KEY   paths to an existing certificate (enables HTTPS)
 
 set -uo pipefail
 
-# ---------- PROJECT SETTINGS ----------
-REPO="${FAP_REPO:-VahidDashtbani/fastasiapanel}"
+# ---------- ADJUST THESE TO MATCH YOUR PROJECT ----------
+REPO="${FAP_REPO:-youruser/fastasiapanel}"
 APP_NAME="fastasiapanel"
-CLI_NAME="fastasian"
-
+# Release asset: ${APP_NAME}-linux-<arch>.tar.gz, which must contain a folder
+# "${APP_NAME}/" with the binary "${APP_NAME}" and "bin/xray" inside.
 # Env var names below must match what internal/config.Load() reads.
-ENV_LISTEN="LISTEN"
-ENV_BASEPATH="BASE_PATH"
-ENV_DBTYPE="DB_TYPE"
-ENV_ADMIN_USER="ADMIN_USER"
-ENV_ADMIN_PASS="ADMIN_PASSWORD"
-ENV_TLS_CERT="TLS_CERT"
-ENV_TLS_KEY="TLS_KEY"
-ENV_SECURE="SECURE_COOKIES"
-# --------------------------------------
+ENV_LISTEN="LISTEN"; ENV_BASEPATH="BASE_PATH"; ENV_DBTYPE="DB_TYPE"
+ENV_ADMIN_USER="ADMIN_USER"; ENV_ADMIN_PASS="ADMIN_PASSWORD"
+ENV_TLS_CERT="TLS_CERT"; ENV_TLS_KEY="TLS_KEY"; ENV_SECURE="SECURE_COOKIES"
+# --------------------------------------------------------
 
-red='\033[0;31m'
-green='\033[0;32m'
-yellow='\033[0;33m'
-plain='\033[0m'
+red='\033[0;31m'; green='\033[0;32m'; yellow='\033[0;33m'; plain='\033[0m'
 
 INSTALL_DIR="/usr/local/${APP_NAME}"
 DATA_DIR="/etc/${APP_NAME}"
@@ -67,11 +57,7 @@ gen_random_string() {
 }
 
 is_port_in_use() {
-    if command -v ss > /dev/null 2>&1; then
-        ss -ltn 2> /dev/null | awk -v p=":$1\$" '$4 ~ p {f=1} END {exit !f}'
-        return
-    fi
-    return 1
+    ss -ltn 2> /dev/null | awk -v p=":$1\$" '$4 ~ p {f=1} END {exit !f}'
 }
 
 pick_port() {
@@ -80,8 +66,7 @@ pick_port() {
         [[ "$FAP_PORT" =~ ^[0-9]+$ ]] && ((FAP_PORT >= 1 && FAP_PORT <= 65535)) \
             || die "Invalid FAP_PORT: $FAP_PORT"
         is_port_in_use "$FAP_PORT" && die "Port $FAP_PORT is already in use."
-        echo "$FAP_PORT"
-        return
+        echo "$FAP_PORT"; return
     fi
     for ((i = 0; i < 100; i++)); do
         p=$(shuf -i 20000-62000 -n 1)
@@ -138,7 +123,7 @@ get_public_ip() {
 install_panel() {
     local tag="${1:-}"
     [[ -n "$tag" ]] || tag=$(resolve_latest_tag)
-    [[ -n "$tag" ]] || die "Could not determine the latest version (check releases on https://github.com/${REPO})."
+    [[ -n "$tag" ]] || die "Could not determine the latest version (is FAP_REPO='${REPO}' correct?)"
     echo "Installing ${APP_NAME} ${tag}..."
 
     local tmp archive url
@@ -152,11 +137,14 @@ install_panel() {
     [[ -s "$archive" ]] || die "Downloaded archive is empty."
     verify_checksum "$url" "$archive"
 
+    # Extract BEFORE touching the running install, so a bad archive never
+    # leaves the panel removed.
     tar -xzf "$archive" -C "$tmp" || die "Failed to extract archive."
     [[ -s "${tmp}/${APP_NAME}/${APP_NAME}" ]] || die "Archive is missing the ${APP_NAME} binary."
 
     systemctl stop "$APP_NAME" 2> /dev/null || true
 
+    # Keep admin-placed files from bin/ (custom geo files etc.)
     local bin_backup=""
     if [[ -d "${INSTALL_DIR}/bin" ]]; then
         bin_backup="${tmp}/bin-backup"
@@ -167,9 +155,9 @@ install_panel() {
     mv "${tmp}/${APP_NAME}" "$INSTALL_DIR" || die "Failed to move files into ${INSTALL_DIR}."
     chmod +x "${INSTALL_DIR}/${APP_NAME}"
     [[ -f "${INSTALL_DIR}/bin/xray-linux-${arch}" ]] && chmod +x "${INSTALL_DIR}/bin/xray-linux-${arch}"
-    [[ -f "${INSTALL_DIR}/bin/xray" ]] && chmod +x "${INSTALL_DIR}/bin/xray"
 
     if [[ -n "$bin_backup" ]]; then
+        # restore only files the new release does not ship
         (cd "$bin_backup" && find . -type f -print0) | while IFS= read -r -d '' f; do
             if [[ ! -e "${INSTALL_DIR}/bin/${f}" ]]; then
                 mkdir -p "${INSTALL_DIR}/bin/$(dirname "$f")"
@@ -178,23 +166,20 @@ install_panel() {
         done
     fi
 
-    if [[ -f "${INSTALL_DIR}/scripts/fastasian.sh" ]]; then
-        install -m 755 "${INSTALL_DIR}/scripts/fastasian.sh" "/usr/local/bin/${CLI_NAME}"
-    fi
-
     ln -sf "${INSTALL_DIR}/${APP_NAME}" "/usr/local/bin/${APP_NAME}"
     mkdir -p "$DATA_DIR" /var/log/"$APP_NAME"
     chmod 700 "$DATA_DIR"
 }
 
+# ---------- config (only on first install; updates keep existing credentials) ----------
 write_config() {
     local user pass port base scheme="http" secure=false host
     user="${FAP_USERNAME:-$(gen_random_string 10)}"
     pass="${FAP_PASSWORD:-$(gen_random_string 14)}"
     base="${FAP_BASE_PATH:-$(gen_random_string 16)}"
-    base="${base#/}"
     port=$(pick_port)
 
+    # umask so the env file is never world-readable, even briefly
     local old_umask; old_umask=$(umask); umask 077
     {
         echo "${ENV_LISTEN}=:${port}"
@@ -240,6 +225,7 @@ ExecStart=${INSTALL_DIR}/${APP_NAME}
 Restart=on-failure
 RestartSec=5s
 LimitNOFILE=65535
+# Give Go's graceful shutdown + xray stop time to finish
 TimeoutStopSec=20
 
 [Install]
@@ -289,3 +275,8 @@ if [[ "$FRESH_INSTALL" == 1 ]]; then
     echo -e "${yellow}Saved to ${RESULT_FILE} (root only). Save the password now.${plain}"
     [[ "$CFG_URL" == http://* ]] && echo -e "${yellow}Panel is plain HTTP. Put it behind a reverse proxy / SSH tunnel, or re-run with FAP_TLS_CERT and FAP_TLS_KEY.${plain}"
 fi
+echo ""
+echo "Useful commands:"
+echo "  systemctl status ${APP_NAME}"
+echo "  journalctl -u ${APP_NAME} -f"
+echo "  ${APP_NAME} reset-admin <user> <pass>   # needs the env vars: set -a; . ${ENV_FILE}; set +a"
