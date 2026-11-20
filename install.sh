@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 #!/bin/bash
 
 red='\033[0;31m'
@@ -469,10 +470,393 @@ Restart=on-failure
 RestartSec=5s
 LimitNOFILE=1048576
 TimeoutStopSec=20
+=======
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_NAME="fastasiapanel"
+CLI_NAME="fastasian"
+REPO="VahidDashtbani/fastasiapanel"
+APP_DIR="/usr/local/${APP_NAME}"
+CONFIG_DIR="/etc/${APP_NAME}"
+ENV_FILE="${CONFIG_DIR}/${APP_NAME}.env"
+RESULT_FILE="${CONFIG_DIR}/install-result.env"
+BIN_PATH="/usr/local/bin/${APP_NAME}"
+CLI_PATH="/usr/local/bin/${CLI_NAME}"
+SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+log_info() { echo -e "${GREEN}[INF]${NC} $*"; }
+log_warn() { echo -e "${YELLOW}[WRN]${NC} $*"; }
+log_err()  { echo -e "${RED}[ERR]${NC} $*" >&2; }
+
+require_root() {
+    if [[ "${EUID}" -ne 0 ]]; then
+        log_err "Please run this installer as root (use sudo)."
+        exit 1
+    fi
+}
+
+detect_os_and_arch() {
+    if [[ -f /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        source /etc/os-release
+        OS_ID="${ID:-linux}"
+    else
+        log_err "Cannot detect operating system (/etc/os-release missing)."
+        exit 1
+    fi
+
+    local raw_arch
+    raw_arch="$(uname -m)"
+    case "${raw_arch}" in
+        x86_64|amd64)  ARCH="amd64" ;;
+        aarch64|arm64) ARCH="arm64" ;;
+        *)
+            log_err "Unsupported CPU architecture: ${raw_arch}"
+            exit 1
+            ;;
+    esac
+}
+
+install_dependencies() {
+    log_info "Checking and installing required packages..."
+    if command -v apt-get >/dev/null 2>&1; then
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq
+        apt-get install -y -qq curl wget tar unzip socat cron ca-certificates openssl >/dev/null
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y -q curl wget tar unzip socat cronie ca-certificates openssl >/dev/null
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y -q curl wget tar unzip socat cronie ca-certificates openssl >/dev/null
+    else
+        log_warn "Unknown package manager; ensure curl, tar, socat, and openssl are installed."
+    fi
+}
+
+tty_read() {
+    local prompt="$1"
+    local var_name="$2"
+    local default_val="${3:-}"
+    local input=""
+
+    if [[ "${NON_INTERACTIVE:-0}" == "1" ]]; then
+        printf -v "${var_name}" '%s' "${default_val}"
+        return
+    fi
+
+    if [[ -r /dev/tty ]]; then
+        printf "%b" "${prompt}" > /dev/tty
+        IFS= read -r input < /dev/tty || input=""
+    else
+        input=""
+    fi
+
+    if [[ -z "${input}" ]]; then
+        printf -v "${var_name}" '%s' "${default_val}"
+    else
+        printf -v "${var_name}" '%s' "${input}"
+    fi
+}
+
+gen_random_string() {
+    local len="${1:-12}"
+    tr -dc 'A-Za-z0-9' </dev/urandom | head -c "${len}" || true
+}
+
+gen_random_port() {
+    local port
+    while true; do
+        port="$(shuf -i 10000-60000 -n 1 2>/dev/null || echo $((10000 + RANDOM % 50000)))"
+        if ! ss -tulpn 2>/dev/null | grep -q ":${port} "; then
+            echo "${port}"
+            return
+        fi
+    done
+}
+
+normalize_web_base_path() {
+    local path="${1:-/}"
+    [[ "${path}" != /* ]] && path="/${path}"
+    if [[ "${#path}" -gt 1 ]]; then
+        path="${path%/}"
+    fi
+    echo "${path}"
+}
+
+detect_server_ip() {
+    SERVER_IP="$(curl -4 -fsSL --max-time 5 https://api.ipify.org 2>/dev/null || \
+                 curl -4 -fsSL --max-time 5 https://ifconfig.me 2>/dev/null || \
+                 hostname -I 2>/dev/null | awk '{print $1}')"
+    SERVER_IP="${SERVER_IP:-127.0.0.1}"
+}
+
+get_latest_version() {
+    if [[ -n "${PANEL_VERSION:-}" ]]; then
+        VERSION="${PANEL_VERSION}"
+        return
+    fi
+
+    local api_url="https://api.github.com/repos/${REPO}/releases/latest"
+    VERSION="$(curl -fsSL "${api_url}" | grep -Po '"tag_name":\s*"\K[^"]+' | head -n 1 || true)"
+    if [[ -z "${VERSION}" ]]; then
+        log_err "Failed to fetch latest release version from GitHub."
+        exit 1
+    fi
+}
+
+download_and_install_binary() {
+    log_info "Got ${APP_NAME} version: ${VERSION}, beginning installation..."
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    trap 'rm -rf "${tmp_dir}"' RETURN
+
+    local asset_name="${APP_NAME}-linux-${ARCH}.tar.gz"
+    local base_url="https://github.com/${REPO}/releases/download/${VERSION}"
+    local archive_path="${tmp_dir}/${asset_name}"
+    local sha_path="${tmp_dir}/${asset_name}.sha256"
+
+    curl -fL --progress-bar "${base_url}/${asset_name}" -o "${archive_path}"
+
+    if curl -fsSL "${base_url}/${asset_name}.sha256" -o "${sha_path}" 2>/dev/null && [[ -s "${sha_path}" ]]; then
+        log_info "Verifying SHA256 checksum..."
+        (cd "${tmp_dir}" && sha256sum -c "${asset_name}.sha256")
+    else
+        log_warn "No checksum published for this release, skipping verification"
+    fi
+
+    tar -xzf "${archive_path}" -C "${tmp_dir}"
+
+    local extracted_bin=""
+    if [[ -f "${tmp_dir}/${APP_NAME}/${APP_NAME}" ]]; then
+        extracted_bin="${tmp_dir}/${APP_NAME}/${APP_NAME}"
+    elif [[ -f "${tmp_dir}/${APP_NAME}" ]]; then
+        extracted_bin="${tmp_dir}/${APP_NAME}"
+    else
+        extracted_bin="$(find "${tmp_dir}" -maxdepth 2 -type f -name "${APP_NAME}" | head -n 1)"
+    fi
+
+    if [[ -z "${extracted_bin}" || ! -s "${extracted_bin}" ]]; then
+        log_err "Archive is missing ${APP_NAME} binary"
+        exit 1
+    fi
+
+    # Backup existing bin/ directory (e.g., xray binary, geoip, geosite)
+    local bin_backup=""
+    if [[ -d "${APP_DIR}/bin" ]]; then
+        bin_backup="${tmp_dir}/bin_backup"
+        cp -a "${APP_DIR}/bin" "${bin_backup}"
+    fi
+
+    systemctl stop "${APP_NAME}" 2>/dev/null || true
+
+    mkdir -p "${APP_DIR}/bin" "${CONFIG_DIR}"
+    install -m 0755 "${extracted_bin}" "${BIN_PATH}"
+
+    if [[ -d "${tmp_dir}/${APP_NAME}/scripts" ]]; then
+        cp -rf "${tmp_dir}/${APP_NAME}/scripts" "${APP_DIR}/"
+    fi
+
+    if [[ -n "${bin_backup}" && -d "${bin_backup}" ]]; then
+        cp -an "${bin_backup}/." "${APP_DIR}/bin/"
+    fi
+}
+
+install_cli_script() {
+    if [[ -f "${APP_DIR}/scripts/fastasian.sh" ]]; then
+        install -m 0755 "${APP_DIR}/scripts/fastasian.sh" "${CLI_PATH}"
+    elif curl -fsSL "https://raw.githubusercontent.com/${REPO}/main/scripts/fastasian.sh" -o "${CLI_PATH}" 2>/dev/null; then
+        chmod 0755 "${CLI_PATH}"
+    else
+        log_warn "CLI script fastasian.sh not found in release or repo; keeping existing if present."
+    fi
+}
+
+collect_user_configuration() {
+    local default_user default_pass default_port default_path
+    default_user="${ADMIN_USER:-$(gen_random_string 10)}"
+    default_pass="${ADMIN_PASS:-$(gen_random_string 14)}"
+    default_port="${PANEL_PORT:-$(gen_random_port)}"
+    default_path="${WEB_BASE_PATH:-/$(gen_random_string 16)}"
+
+    echo ""
+    echo -e "${CYAN}--- FastAsiaPanel Configuration ---${NC}"
+
+    tty_read "Enter admin username [default: ${default_user}]: " ADMIN_USER "${default_user}"
+    tty_read "Enter admin password [default: ${default_pass}]: " ADMIN_PASS "${default_pass}"
+    tty_read "Enter panel port [default: ${default_port}]: " PANEL_PORT "${default_port}"
+    tty_read "Enter web base path [default: ${default_path}]: " WEB_BASE_PATH "${default_path}"
+    WEB_BASE_PATH="$(normalize_web_base_path "${WEB_BASE_PATH}")"
+
+    local db_choice
+    tty_read "Select database (1: SQLite [default], 2: PostgreSQL): " db_choice "${DB_CHOICE:-1}"
+    if [[ "${db_choice}" == "2" ]]; then
+        DB_TYPE="postgres"
+        tty_read "Enter PostgreSQL DSN (e.g. postgres://user:pass@127.0.0.1:5432/fastasiapanel?sslmode=disable): " DB_DSN "${DB_DSN:-}"
+        if [[ -z "${DB_DSN}" ]]; then
+            log_warn "Empty PostgreSQL DSN provided; falling back to SQLite."
+            DB_TYPE="sqlite"
+            DB_DSN="${CONFIG_DIR}/${APP_NAME}.db"
+        fi
+    else
+        DB_TYPE="sqlite"
+        DB_DSN="${CONFIG_DIR}/${APP_NAME}.db"
+    fi
+}
+
+setup_ssl_certificate() {
+    SSL_CERT_PATH=""
+    SSL_KEY_PATH=""
+    SSL_DOMAIN=""
+
+    local ssl_choice
+    echo ""
+    echo -e "${CYAN}--- SSL Certificate Setup ---${NC}"
+    echo "1) Skip SSL (HTTP only)"
+    echo "2) Domain SSL via Let's Encrypt (acme.sh)"
+    echo "3) IP Short-Lived SSL Certificate via acme.sh"
+    tty_read "Choose SSL option [1-3, default: 1]: " ssl_choice "${SSL_CHOICE:-1}"
+
+    [[ "${ssl_choice}" == "1" ]] && return 0
+
+    local cert_dir="${CONFIG_DIR}/cert"
+    mkdir -p "${cert_dir}"
+
+    if [[ ! -f "${HOME}/.acme.sh/acme.sh" ]]; then
+        log_info "Installing acme.sh..."
+        curl -fsSL https://get.acme.sh | sh -s email="admin@$(hostname -f 2>/dev/null || echo example.com)" >/dev/null 2>&1 || true
+    fi
+
+    local acme_bin="${HOME}/.acme.sh/acme.sh"
+    if [[ ! -x "${acme_bin}" ]]; then
+        log_warn "acme.sh installation failed; continuing with HTTP."
+        return 0
+    fi
+
+    if [[ "${ssl_choice}" == "2" ]]; then
+        tty_read "Enter your domain pointing to ${SERVER_IP}: " SSL_DOMAIN "${SSL_DOMAIN:-}"
+        if [[ -z "${SSL_DOMAIN}" ]]; then
+            log_warn "No domain entered; skipping SSL."
+            return 0
+        fi
+        log_info "Issuing Let's Encrypt certificate for ${SSL_DOMAIN}..."
+        "${acme_bin}" --set-default-ca --server letsencrypt >/dev/null 2>&1 || true
+        if "${acme_bin}" --issue -d "${SSL_DOMAIN}" --standalone --httpport 80 --force; then
+            "${acme_bin}" --install-cert -d "${SSL_DOMAIN}" \
+                --key-file "${cert_dir}/privkey.pem" \
+                --fullchain-file "${cert_dir}/fullchain.pem" \
+                --reloadcmd "systemctl restart ${APP_NAME}"
+            SSL_CERT_PATH="${cert_dir}/fullchain.pem"
+            SSL_KEY_PATH="${cert_dir}/privkey.pem"
+            log_info "Domain SSL certificate installed successfully."
+        else
+            log_warn "Failed to issue domain certificate (ensure port 80 is free and DNS points to ${SERVER_IP}). Falling back to HTTP."
+        fi
+    elif [[ "${ssl_choice}" == "3" ]]; then
+        log_info "Issuing short-lived IP certificate for ${SERVER_IP}..."
+        "${acme_bin}" --set-default-ca --server letsencrypt >/dev/null 2>&1 || true
+        if "${acme_bin}" --issue -d "${SERVER_IP}" --standalone --httpport 80 --certificate-profile shortlived --days 6 --force; then
+            "${acme_bin}" --install-cert -d "${SERVER_IP}" \
+                --key-file "${cert_dir}/privkey.pem" \
+                --fullchain-file "${cert_dir}/fullchain.pem" \
+                --reloadcmd "systemctl restart ${APP_NAME}"
+            SSL_CERT_PATH="${cert_dir}/fullchain.pem"
+            SSL_KEY_PATH="${cert_dir}/privkey.pem"
+            log_info "IP SSL certificate installed successfully."
+        else
+            log_warn "Failed to issue IP certificate (ensure port 80 is free). Falling back to HTTP."
+        fi
+    fi
+}
+
+apply_panel_settings() {
+    mkdir -p "${CONFIG_DIR}"
+    WEB_BASE_PATH="$(normalize_web_base_path "${WEB_BASE_PATH}")"
+
+    local ssl_enabled="false"
+    if [[ -n "${SSL_CERT_PATH:-}" && -n "${SSL_KEY_PATH:-}" && -s "${SSL_CERT_PATH}" && -s "${SSL_KEY_PATH}" ]]; then
+        ssl_enabled="true"
+    else
+        SSL_CERT_PATH=""
+        SSL_KEY_PATH=""
+    fi
+
+    # Write environment variables consumed by config.Load()
+    cat > "${ENV_FILE}" <<EOF
+LISTEN=0.0.0.0:${PANEL_PORT}
+PANEL_LISTEN=0.0.0.0:${PANEL_PORT}
+PANEL_PORT=${PANEL_PORT}
+BASE_PATH=${WEB_BASE_PATH}
+PANEL_BASE_PATH=${WEB_BASE_PATH}
+PANEL_WEB_BASE_PATH=${WEB_BASE_PATH}
+ADMIN_USER=${ADMIN_USER}
+ADMIN_PASSWORD=${ADMIN_PASS}
+PANEL_ADMIN_USER=${ADMIN_USER}
+PANEL_ADMIN_PASSWORD=${ADMIN_PASS}
+DB_TYPE=${DB_TYPE}
+DB_DSN=${DB_DSN}
+DATABASE_URL=${DB_DSN}
+TLS_CERT=${SSL_CERT_PATH}
+TLS_KEY=${SSL_KEY_PATH}
+SSL_CERT_FILE=${SSL_CERT_PATH}
+SSL_KEY_FILE=${SSL_KEY_PATH}
+SECURE_COOKIES=${ssl_enabled}
+PANEL_SECURE_COOKIES=${ssl_enabled}
+XRAY_BIN=${APP_DIR}/bin/xray
+EOF
+    chmod 600 "${ENV_FILE}"
+
+    # Sync admin credentials directly in database via main.go's reset-admin subcommand
+    set -a
+    # shellcheck disable=SC1090
+    source "${ENV_FILE}"
+    set +a
+
+    if [[ -x "${BIN_PATH}" ]]; then
+        "${BIN_PATH}" reset-admin "${ADMIN_USER}" "${ADMIN_PASS}" >/dev/null 2>&1 || true
+    fi
+}
+
+configure_firewall_port() {
+    local port="$1"
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+        ufw allow "${port}/tcp" >/dev/null 2>&1 || true
+        ufw allow "${port}/udp" >/dev/null 2>&1 || true
+        log_info "Opened port ${port} in UFW."
+    elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
+        firewall-cmd --permanent --add-port="${port}/tcp" >/dev/null 2>&1 || true
+        firewall-cmd --permanent --add-port="${port}/udp" >/dev/null 2>&1 || true
+        firewall-cmd --reload >/dev/null 2>&1 || true
+        log_info "Opened port ${port} in firewalld."
+    fi
+}
+
+setup_systemd_service() {
+    cat > "${SERVICE_FILE}" <<EOF
+[Unit]
+Description=FastAsiaPanel Xray Management Web Panel
+After=network.target nss-lookup.target
+
+[Service]
+Type=simple
+WorkingDirectory=${APP_DIR}
+EnvironmentFile=-${ENV_FILE}
+ExecStart=${BIN_PATH}
+Restart=on-failure
+RestartSec=3s
+LimitNOFILE=1048576
+>>>>>>> 6cb7696 (Sync install.sh with main.go reset-admin, env config, and HTTP/HTTPS URL handling)
 
 [Install]
 WantedBy=multi-user.target
 EOF
+<<<<<<< HEAD
     chmod 644 "$unit_file"
     systemctl daemon-reload
     systemctl enable "${fap_service_name}" >/dev/null 2>&1 || true
@@ -618,3 +1002,75 @@ echo -e "${green}Running...${plain}"
 install_base
 install_fastasiapanel "${1:-}"
 config_after_install
+=======
+
+    systemctl daemon-reload
+    systemctl enable "${APP_NAME}" >/dev/null 2>&1
+    systemctl restart "${APP_NAME}"
+}
+
+print_install_summary() {
+    local proto="http"
+    local access_host="${SERVER_IP}"
+
+    if [[ -n "${SSL_CERT_PATH:-}" && -n "${SSL_KEY_PATH:-}" && -s "${SSL_CERT_PATH}" && -s "${SSL_KEY_PATH}" ]]; then
+        proto="https"
+        if [[ -n "${SSL_DOMAIN:-}" ]]; then
+            access_host="${SSL_DOMAIN}"
+        fi
+    fi
+
+    local url_host="${access_host}"
+    if [[ "${url_host}" == *:* && "${url_host}" != \[*\] ]]; then
+        url_host="[${url_host}]"
+    fi
+
+    local clean_path=""
+    if [[ "${WEB_BASE_PATH}" != "/" ]]; then
+        clean_path="${WEB_BASE_PATH}"
+    fi
+    ACCESS_URL="${proto}://${url_host}:${PANEL_PORT}${clean_path}"
+
+    cat > "${RESULT_FILE}" <<EOF
+PANEL_USERNAME=${ADMIN_USER}
+PANEL_PASSWORD=${ADMIN_PASS}
+PANEL_PORT=${PANEL_PORT}
+PANEL_WEB_BASE_PATH=${WEB_BASE_PATH}
+DB_TYPE=${DB_TYPE}
+SSL_ENABLED=$( [[ "${proto}" == "https" ]] && echo "true" || echo "false" )
+ACCESS_URL=${ACCESS_URL}
+EOF
+    chmod 600 "${RESULT_FILE}"
+
+    echo ""
+    echo "═══════════════════════════════════════════"
+    echo "     FastAsiaPanel Installation Complete!    "
+    echo "═══════════════════════════════════════════"
+    echo "Username:    ${ADMIN_USER}"
+    echo "Password:    ${ADMIN_PASS}"
+    echo "Port:        ${PANEL_PORT}"
+    echo "WebBasePath: ${WEB_BASE_PATH}"
+    echo "Database:    ${DB_TYPE}"
+    echo "SSL Mode:    ${proto^^}"
+    echo "Access URL:  ${ACCESS_URL}"
+    echo "═══════════════════════════════════════════"
+}
+
+main() {
+    require_root
+    detect_os_and_arch
+    install_dependencies
+    detect_server_ip
+    get_latest_version
+    download_and_install_binary
+    install_cli_script
+    collect_user_configuration
+    setup_ssl_certificate
+    apply_panel_settings
+    configure_firewall_port "${PANEL_PORT}"
+    setup_systemd_service
+    print_install_summary
+}
+
+main "$@"
+>>>>>>> 6cb7696 (Sync install.sh with main.go reset-admin, env config, and HTTP/HTTPS URL handling)
