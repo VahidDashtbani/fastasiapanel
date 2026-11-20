@@ -11,10 +11,15 @@ NC='\033[0m'
 
 [[ $EUID -ne 0 ]] && exec sudo "$0" "$@"
 
+if ! command -v infocmp >/dev/null 2>&1 || ! infocmp "${TERM:-}" >/dev/null 2>&1; then
+  export TERM=xterm-256color
+fi
+
 CONF_DIR="/etc/fastasiapanel"
 ENV_FILE="${CONF_DIR}/panel.env"
 DATA_DIR="/var/lib/fastasiapanel"
 APP_DIR="/opt/fastasiapanel"
+SRC_DIR="/usr/local/src/fastasiapanel"
 BIN_PATH="/usr/local/bin/fastasiapanel"
 CLI_PATH="/usr/local/bin/fastasian"
 SERVICE_NAME="fastasiapanel"
@@ -25,6 +30,10 @@ CLI_URL="https://raw.githubusercontent.com/VahidDashtbani/fastasiapanel/main/scr
 LOGI() { echo -e "${GREEN}[INF]${NC} $*"; }
 LOGW() { echo -e "${YELLOW}[WRN]${NC} $*"; }
 LOGE() { echo -e "${RED}[ERR]${NC} $*"; }
+
+safe_clear() {
+  clear 2>/dev/null || printf '\033[2J\033[H'
+}
 
 load_env() {
   if [[ -f "${ENV_FILE}" ]]; then
@@ -116,6 +125,15 @@ panel_installed() {
   [[ -x "${BIN_PATH}" && -f "${SERVICE_FILE}" ]]
 }
 
+require_installed() {
+  if ! panel_installed; then
+    LOGE "FastAsiaPanel is not installed."
+    echo -e "Install it first with:"
+    echo -e "  ${CYAN}curl -fsSL \"${INSTALL_URL}?v=\$(date +%s)\" -o /tmp/install_fap.sh && bash /tmp/install_fap.sh${NC}"
+    exit 1
+  fi
+}
+
 panel_running() {
   systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null
 }
@@ -131,18 +149,20 @@ xray_running() {
 show_status_summary() {
   if ! panel_installed; then
     echo -e "  Panel State    : ${RED}Not Installed${NC}"
-  elif panel_running; then
+    echo -e "  Xray Core      : ${YELLOW}N/A (Panel not installed)${NC}"
+    return 0
+  fi
+
+  if panel_running; then
     echo -e "  Panel State    : ${GREEN}● Running${NC}"
   else
     echo -e "  Panel State    : ${RED}● Stopped${NC}"
   fi
 
-  if panel_installed; then
-    if panel_enabled; then
-      echo -e "  Autostart      : ${GREEN}Enabled${NC}"
-    else
-      echo -e "  Autostart      : ${YELLOW}Disabled${NC}"
-    fi
+  if panel_enabled; then
+    echo -e "  Autostart      : ${GREEN}Enabled${NC}"
+  else
+    echo -e "  Autostart      : ${YELLOW}Disabled${NC}"
   fi
 
   if xray_running; then
@@ -153,10 +173,7 @@ show_status_summary() {
 }
 
 start_panel() {
-  if ! panel_installed; then
-    LOGE "FastAsiaPanel is not installed."
-    return 1
-  fi
+  require_installed
   if panel_running; then
     LOGI "FastAsiaPanel is already running."
     return 0
@@ -172,10 +189,7 @@ start_panel() {
 }
 
 stop_panel() {
-  if ! panel_installed; then
-    LOGE "FastAsiaPanel is not installed."
-    return 1
-  fi
+  require_installed
   if ! panel_running; then
     LOGW "FastAsiaPanel is already stopped."
     return 0
@@ -191,10 +205,7 @@ stop_panel() {
 }
 
 restart_panel() {
-  if ! panel_installed; then
-    LOGE "FastAsiaPanel is not installed."
-    return 1
-  fi
+  require_installed
   systemctl restart "${SERVICE_NAME}"
   sleep 2
   if panel_running; then
@@ -206,6 +217,7 @@ restart_panel() {
 }
 
 restart_xray() {
+  require_installed
   load_env
   local port="${FAP_PORT:-2053}"
   local base="${FAP_BASE_PATH:-}"
@@ -218,18 +230,12 @@ restart_xray() {
 }
 
 enable_autostart() {
-  if ! panel_installed; then
-    LOGE "FastAsiaPanel is not installed."
-    return 1
-  fi
+  require_installed
   systemctl enable "${SERVICE_NAME}" && LOGI "Autostart enabled."
 }
 
 disable_autostart() {
-  if ! panel_installed; then
-    LOGE "FastAsiaPanel is not installed."
-    return 1
-  fi
+  require_installed
   systemctl disable "${SERVICE_NAME}" && LOGI "Autostart disabled."
 }
 
@@ -259,6 +265,7 @@ show_logs_menu() {
 }
 
 show_settings() {
+  require_installed
   load_env
   local ip
   ip=$(server_ip)
@@ -293,6 +300,7 @@ show_settings() {
 }
 
 reset_credentials() {
+  require_installed
   load_env
   local new_user="" new_pass=""
   read -rp "New Admin Username [empty = random]: " new_user </dev/tty
@@ -311,6 +319,7 @@ reset_credentials() {
 }
 
 reset_web_base_path() {
+  require_installed
   load_env
   local new_path=""
   read -rp "New Web Base Path (e.g. /mysecret or empty = random): " new_path </dev/tty
@@ -328,6 +337,7 @@ reset_web_base_path() {
 }
 
 change_panel_port() {
+  require_installed
   load_env
   local new_port=""
   read -rp "New Panel Port [1-65535, empty = random]: " new_port </dev/tty
@@ -356,8 +366,8 @@ change_panel_port() {
 }
 
 update_panel() {
-  if ! confirm "Update FastAsiaPanel from GitHub (existing data and config are kept)?" "y"; then
-    LOGW "Update cancelled."
+  if ! confirm "Install or update FastAsiaPanel from GitHub?" "y"; then
+    LOGW "Operation cancelled."
     return 0
   fi
   LOGI "Running installer from GitHub..."
@@ -383,6 +393,7 @@ update_cli_script() {
 }
 
 update_geodata() {
+  require_installed
   LOGI "Updating GeoIP and GeoSite files..."
   mkdir -p /usr/local/share/xray
   local ok=1
@@ -406,6 +417,7 @@ install_acme_if_needed() {
 }
 
 ssl_menu() {
+  require_installed
   while true; do
     echo ""
     echo -e "${CYAN}--- SSL Certificate Management (Let's Encrypt / acme.sh) ---${NC}"
@@ -429,7 +441,7 @@ ssl_menu() {
         read -rp "Standalone HTTP port [default 80]: " webport </dev/tty
         webport="${webport:-80}"
         if is_port_in_use "${webport}"; then
-          LOGE "Port ${webport} is currently in use. Stop the service using port ${webport} or choose another port."
+          LOGE "Port ${webport} is currently in use."
           pause_key
           continue
         fi
@@ -653,19 +665,23 @@ postgres_menu() {
 
 uninstall_panel() {
   echo ""
-  if ! confirm "Are you sure you want to uninstall FastAsiaPanel?" "n"; then
+  if ! confirm "Are you sure you want to completely uninstall FastAsiaPanel and remove all files/processes?" "n"; then
     LOGW "Uninstall cancelled."
     return 0
   fi
+
+  LOGI "Stopping service and background processes..."
   systemctl stop "${SERVICE_NAME}" >/dev/null 2>&1 || true
   systemctl disable "${SERVICE_NAME}" >/dev/null 2>&1 || true
+  pkill -f "(^|/)(fastasiapanel|xray|xray-linux)" >/dev/null 2>&1 || true
+
   rm -f "${SERVICE_FILE}"
-  systemctl daemon-reload
-  rm -rf "${APP_DIR}" "${CONF_DIR}" "${BIN_PATH}" "${CLI_PATH}"
-  if confirm "Also delete panel data directory (${DATA_DIR})?" "n"; then
-    rm -rf "${DATA_DIR}"
-  fi
-  LOGI "FastAsiaPanel uninstalled."
+  systemctl daemon-reload >/dev/null 2>&1 || true
+
+  rm -rf "${APP_DIR}" "${CONF_DIR}" "${DATA_DIR}" "${SRC_DIR}"
+  rm -f "${BIN_PATH}" "${CLI_PATH}"
+
+  LOGI "FastAsiaPanel completely removed from root."
   exit 0
 }
 
@@ -681,13 +697,14 @@ show_usage() {
   echo "  fastasian enable          Enable autostart on boot"
   echo "  fastasian disable         Disable autostart on boot"
   echo "  fastasian log             Follow live service logs"
-  echo "  fastasian update          Update FastAsiaPanel from GitHub"
-  echo "  fastasian uninstall       Uninstall FastAsiaPanel"
+  echo "  fastasian update          Install or update FastAsiaPanel from GitHub"
+  echo "  fastasian uninstall       Completely uninstall FastAsiaPanel"
 }
 
 show_menu() {
+  require_installed
   while true; do
-    clear
+    safe_clear
     load_env
     local port="${FAP_PORT:-2053}"
     local db="${FAP_DB:-sqlite}"
@@ -749,7 +766,7 @@ if [[ $# -gt 0 ]]; then
     settings) show_settings ;;
     enable) enable_autostart ;;
     disable) disable_autostart ;;
-    log) journalctl -u "${SERVICE_NAME}" -e --no-pager -f ;;
+    log) require_installed; journalctl -u "${SERVICE_NAME}" -e --no-pager -f ;;
     update) update_panel ;;
     uninstall) uninstall_panel ;;
     *) show_usage ;;
