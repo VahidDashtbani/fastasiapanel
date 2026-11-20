@@ -69,19 +69,26 @@ func BuildLink(in store.Inbound, c store.Client, defaultHost string) string {
 			q.Set("allowInsecure", "1")
 		}
 	case "reality":
-		q.Set("pbk", o.Reality.PublicKey)
-		q.Set("sni", o.Reality.ServerName)
-		q.Set("sid", o.Reality.ShortID)
-		fp := o.Reality.Fingerprint
-		if fp == "" {
-			fp = "chrome"
-		}
-		spx := o.Reality.SpiderX
-		if spx == "" {
-			spx = "/"
-		}
-		q.Set("fp", fp)
-		q.Set("spx", spx)
+	q.Set("pbk", o.Reality.PublicKey)
+	sni := firstCSV(o.Reality.ServerName)
+	if sni == "" {
+		sni = bare
+	}
+	q.Set("sni", sni)
+	sid := firstCSV(o.Reality.ShortID)
+	if sid != "" {
+		q.Set("sid", sid)
+	}
+	fp := o.Reality.Fingerprint
+	if fp == "" {
+		fp = "chrome"
+	}
+	spx := o.Reality.SpiderX
+	if spx == "" {
+		spx = "/"
+	}
+	q.Set("fp", fp)
+	q.Set("spx", spx)
 	}
 
 	remarkLabel := c.Email
@@ -180,4 +187,12 @@ func BuildSubscription(st store.State, subID string, defaultHost string) (SubRes
 	joined := strings.Join(links, "\n")
 	res.Content = base64.StdEncoding.EncodeToString([]byte(joined))
 	return res, true
+}
+func firstCSV(v string) string {
+	for _, part := range strings.Split(v, ",") {
+		if s := strings.TrimSpace(part); s != "" {
+			return s
+		}
+	}
+	return ""
 }

@@ -54,19 +54,38 @@ type Client struct {
 	CreatedAt   time.Time       `json:"created_at"`
 }
 
+type OutboundStream struct {
+	Network    string `json:"network,omitempty"`     
+	Security   string `json:"security,omitempty"`    
+	SNI        string `json:"sni,omitempty"`
+	ALPN       string `json:"alpn,omitempty"`        
+	Fingerprint string `json:"fingerprint,omitempty"` 
+	Path       string `json:"path,omitempty"`
+	Host       string `json:"host,omitempty"`
+	ServiceName string `json:"service_name,omitempty"`
+	Mode       string `json:"mode,omitempty"`        
+	PublicKey  string `json:"public_key,omitempty"` 
+	ShortID    string `json:"short_id,omitempty"`    
+	SpiderX    string `json:"spider_x,omitempty"`    
+	Flow       string `json:"flow,omitempty"`       
+	AlterID    int    `json:"alter_id,omitempty"`    
+	Cipher     string `json:"cipher,omitempty"`      
+}
+
 type Outbound struct {
 	ID       string          `json:"id"`
 	Tag      string          `json:"tag"`
 	Remark   string          `json:"remark"`
-	Protocol string          `json:"protocol"`
+	Protocol string          `json:"protocol"` 
 	Address  string          `json:"address,omitempty"`
 	Port     int             `json:"port,omitempty"`
-	Username string          `json:"username,omitempty"`
-	Password string          `json:"password,omitempty"`
+	Username string          `json:"username,omitempty"` 
+	Password string          `json:"password,omitempty"` 
+	RelayTag string          `json:"relay_tag,omitempty"` 
+	Stream   *OutboundStream `json:"stream,omitempty"`
 	Settings json.RawMessage `json:"settings,omitempty"`
 	Enable   bool            `json:"enable"`
 }
-
 type RoutingRule struct {
 	ID          string   `json:"id"`
 	Remark      string   `json:"remark"`

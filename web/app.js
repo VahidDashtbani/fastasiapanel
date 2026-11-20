@@ -671,7 +671,7 @@
     }
   }
 
- function renderRouting() {
+  function renderRouting() {
     topActions.innerHTML = '<div class="top-tools">' +
       '<button class="btn sec" data-act="update-geo">Update GeoIP / GeoSite</button>' +
       '<button class="btn sec" data-act="new-outbound">+ New Outbound</button>' +
@@ -681,6 +681,11 @@
       state.outbounds = res[0] || [];
       state.rules = res[1] || [];
       state.inbounds = res[2] || [];
+
+      var ibFilterOpts = opt('', 'Any Inbound', '');
+      state.inbounds.forEach(function (ib) {
+        ibFilterOpts += opt(ib.tag, ib.tag + (ib.remark ? ' (' + ib.remark + ')' : ''), '');
+      });
 
       var html = '<div class="card pad"><h3>One-Click Routing Presets</h3>' +
         '<div class="top-tools">' +
@@ -695,7 +700,7 @@
         html += '<div class="empty" style="padding:18px">No custom routing rules configured.</div>';
       } else {
         html += '<div style="overflow-x:auto"><table><thead><tr><th>Status</th><th>Rule Name</th><th>Inbound</th><th>Domains / IPs</th><th>Outbound</th><th>Priority</th><th>Actions</th></tr></thead><tbody>';
-        state.rules.forEach(function (r) {
+        state.rules.forEach(function (r, idx) {
           var conds = [].concat(r.domains || [], r.ips || []).join(', ') || '*';
           var ibs = (r.inbound_tags && r.inbound_tags.length) ? r.inbound_tags.join(', ') : 'All';
           html += '<tr>' +
@@ -705,11 +710,26 @@
             '<td class="ltr"><code>' + esc(conds) + '</code></td>' +
             '<td><span class="tag">' + esc(r.outbound_tag) + '</span></td>' +
             '<td class="num">' + r.priority + '</td>' +
-            '<td><button class="icon-btn danger" data-act="del-rule" data-rid="' + esc(r.id) + '">Delete</button></td></tr>';
+            '<td style="white-space:nowrap">' +
+            (idx > 0 ? '<button class="icon-btn" data-act="move-rule" data-dir="up" data-rid="' + esc(r.id) + '" title="Move Up">↑</button> ' : '') +
+            (idx < state.rules.length - 1 ? '<button class="icon-btn" data-act="move-rule" data-dir="down" data-rid="' + esc(r.id) + '" title="Move Down">↓</button> ' : '') +
+            '<button class="icon-btn" data-act="edit-rule" data-rid="' + esc(r.id) + '">Edit</button> ' +
+            '<button class="icon-btn danger" data-act="del-rule" data-rid="' + esc(r.id) + '">Delete</button>' +
+            '</td></tr>';
         });
         html += '</tbody></table></div>';
       }
       html += '</div>';
+
+      html += '<div class="card pad"><h3>Routing Rule Simulator</h3>' +
+        '<div class="grid2" style="margin-bottom:10px">' +
+        '<label>Domain / IP / Host:Port<input class="ltr" id="rt-sim-target" placeholder="openai.com or 1.1.1.1 or google.com:443"></label>' +
+        '<label>Destination Port (Optional)<input class="ltr" id="rt-sim-port" placeholder="443"></label>' +
+        '<label>Inbound Tag (Optional)<select id="rt-sim-inbound">' + ibFilterOpts + '</select></label>' +
+        '<div style="display:flex;align-items:flex-end"><button type="button" class="btn sec" data-act="test-rule">Test Routing Match</button></div>' +
+        '</div>' +
+        '<div id="rt-sim-result" class="hint">Enter a domain, IP, port, or inbound to preview which outbound will handle it.</div>' +
+        '</div>';
 
       html += '<div class="card pad"><h3>Outbounds</h3>' +
         '<div style="overflow-x:auto"><table><thead><tr><th>Status</th><th>Tag</th><th>Remark</th><th>Protocol</th><th>Target</th><th>Actions</th></tr></thead><tbody>' +
@@ -763,27 +783,35 @@
     });
   }
 
-  function openRuleModal() {
-    var obOpts = opt('direct', 'direct', 'direct') + opt('blocked', 'blocked', '');
-    state.outbounds.forEach(function (o) {
-      obOpts += opt(o.tag, o.tag + (o.remark ? ' (' + o.remark + ')' : ''), '');
+  function openRuleModal(existingRule) {
+    var r = existingRule || {};
+    var isEdit = Boolean(r.id);
+    var obOpts = opt('direct', 'direct', r.outbound_tag || 'direct') + opt('blocked', 'blocked', r.outbound_tag || '');
+    (state.outbounds || []).forEach(function (o) {
+      obOpts += opt(o.tag, o.tag + (o.remark ? ' (' + o.remark + ')' : ''), r.outbound_tag || '');
     });
-    var ibOpts = opt('', 'All Inbounds (Any)', '');
+
+    var currentFirstIb = (r.inbound_tags && r.inbound_tags.length) ? r.inbound_tags[0] : '';
+    var ibOpts = opt('', 'All Inbounds (Any)', currentFirstIb);
     (state.inbounds || []).forEach(function (ib) {
       var label = ib.tag + (ib.remark ? ' (' + ib.remark + ')' : '') + (ib.port ? ' :' + ib.port : '');
-      ibOpts += opt(ib.tag, label, '');
+      ibOpts += opt(ib.tag, label, currentFirstIb);
     });
+
+    var extraIbsInitial = (r.inbound_tags && r.inbound_tags.length > 1) ? r.inbound_tags.slice(1).join(', ') : '';
+
     var body = '<div class="grid2">' +
-      '<label>Rule Name<input name="remark" placeholder="AI Services" required></label>' +
+      '<label>Rule Name<input name="remark" placeholder="AI Services" value="' + esc(r.remark || '') + '" required></label>' +
       '<label>Target Outbound<select name="outbound_tag">' + obOpts + '</select></label>' +
       '<label>Target Inbound<select name="target_inbound">' + ibOpts + '</select></label>' +
-      '<label>Extra Inbound Tags (optional)<input class="ltr" name="inbound_tags" placeholder="vless-in,vmess-in"></label>' +
-      '<label class="span2">Domains (comma-separated)<input class="ltr" name="domains" placeholder="geosite:openai,domain:google.com"></label>' +
-      '<label class="span2">IPs / CIDRs (comma-separated)<input class="ltr" name="ips" placeholder="geoip:ir,1.1.1.1/32"></label>' +
-      '<label>Destination Port (Optional)<input class="ltr" name="port" placeholder="80,443"></label>' +
-      '<label>Priority (lower = higher priority)<input class="ltr" name="priority" type="number" step="1" value="50"></label>' +
+      '<label>Extra Inbound Tags (optional)<input class="ltr" name="inbound_tags" value="' + esc(extraIbsInitial) + '" placeholder="vless-in,vmess-in"></label>' +
+      '<label class="span2">Domains (comma-separated)<input class="ltr" name="domains" value="' + esc((r.domains || []).join(', ')) + '" placeholder="geosite:openai,domain:google.com"></label>' +
+      '<label class="span2">IPs / CIDRs (comma-separated)<input class="ltr" name="ips" value="' + esc((r.ips || []).join(', ')) + '" placeholder="geoip:ir,1.1.1.1/32"></label>' +
+      '<label>Destination Port (Optional)<input class="ltr" name="port" value="' + esc(r.port || '') + '" placeholder="80,443"></label>' +
+      '<label>Priority (lower = higher priority)<input class="ltr" name="priority" type="number" step="1" value="' + (typeof r.priority === 'number' ? r.priority : 50) + '"></label>' +
       '</div>';
-    openModal('New Routing Rule', body, function (form, setErr) {
+
+    openModal(isEdit ? 'Edit Routing Rule' : 'New Routing Rule', body, function (form, setErr) {
       var f = form.elements;
       var splitList = function (el) {
         if (!el || !el.value) return [];
@@ -813,7 +841,7 @@
         return;
       }
 
-      api('POST', 'routing', {
+      var payload = {
         remark: remark,
         outbound_tag: outboundTag,
         inbound_tags: inboundTags,
@@ -821,9 +849,15 @@
         ips: ips,
         port: port,
         priority: priority
-      }).then(function () {
+      };
+
+      var reqPromise = isEdit
+        ? api('PUT', 'routing/' + encodeURIComponent(r.id), payload)
+        : api('POST', 'routing', payload);
+
+      reqPromise.then(function () {
         closeModal();
-        toast('Routing rule created');
+        toast(isEdit ? 'Routing rule updated' : 'Routing rule created');
         renderRouting();
       }).catch(function (e) { setErr(e.message); });
     });
@@ -832,13 +866,13 @@
   function renderQuotas() {
     topActions.innerHTML = '<button class="btn" data-act="new-group">+ New Quota Group</button>';
     api('GET', 'quota-groups').then(function (list) {
-      state.groups = list;
-      if (!list.length) {
+      state.groups = list || [];
+      if (!state.groups.length) {
         view.innerHTML = '<div class="card empty">No shared quota groups configured.</div>';
         return;
       }
       var html = '<div class="card" style="overflow-x:auto"><table><thead><tr><th>Group Name</th><th>Used Traffic</th><th>Total Limit</th><th>Members</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
-      list.forEach(function (g) {
+      state.groups.forEach(function (g) {
         var pct = g.total_bytes > 0 ? Math.min(100, Math.round(g.used_bytes * 100 / g.total_bytes)) : 0;
         var barCls = pct >= 100 ? 'full' : pct >= 85 ? 'high' : '';
         html += '<tr>' +
@@ -847,7 +881,10 @@
           '<td class="num">' + (g.total_bytes > 0 ? fmtBytes(g.total_bytes) : 'Unlimited') + '</td>' +
           '<td class="num">' + g.members + '</td>' +
           '<td><span class="tag ' + (g.enable ? 'ok' : 'off') + '">' + (g.enable ? 'Active' : 'Disabled') + '</span></td>' +
-          '<td><button class="icon-btn danger" data-act="del-group" data-gid="' + esc(g.id) + '">Delete</button></td></tr>';
+          '<td><div class="row-actions">' +
+          '<button class="icon-btn" data-act="edit-group" data-gid="' + esc(g.id) + '">Edit</button>' +
+          '<button class="icon-btn danger" data-act="del-group" data-gid="' + esc(g.id) + '">Delete</button>' +
+          '</div></td></tr>';
       });
       html += '</tbody></table></div>';
       view.innerHTML = html;
@@ -855,17 +892,31 @@
     }).catch(fail);
   }
 
-  function openGroupModal() {
+  function openGroupModal(grp) {
+    var isEdit = !!grp;
+    var curGB = isEdit && grp.total_bytes > 0
+      ? (grp.total_bytes / Math.pow(1024, 3)).toFixed(2).replace(/\.?0+$/, '')
+      : '50';
     var body = '<div class="grid2">' +
-      '<label>Group Name<input name="name" required></label>' +
-      '<label>Total Quota (GB)<input class="ltr" name="gb" type="number" min="1" step="0.5" required></label>' +
+      '<label>Group Name<input name="name" value="' + esc(isEdit ? grp.name : '') + '" required></label>' +
+      '<label>Total Quota (GB)<input class="ltr" name="gb" type="number" min="0" step="0.5" value="' + esc(curGB) + '" required></label>' +
+      (isEdit ? '<label class="span2"><input name="enable" type="checkbox"' + (grp.enable ? ' checked' : '') + '> Active Group</label>' : '') +
       '</div>';
-    openModal('New Shared Quota Group', body, function (form, setErr) {
+    openModal(isEdit ? 'Edit Quota Group' : 'New Shared Quota Group', body, function (form, setErr) {
       var f = form.elements;
-      var total = Math.round(parseFloat(f.gb.value) * Math.pow(1024, 3));
-      api('POST', 'quota-groups', { name: f.name.value.trim(), total_bytes: total }).then(function () {
+      var gbVal = parseFloat(f.gb.value) || 0;
+      var total = Math.round(gbVal * Math.pow(1024, 3));
+      var payload = {
+        name: f.name.value.trim(),
+        total_bytes: total
+      };
+      if (isEdit) payload.enable = !!(f.enable && f.enable.checked);
+      var req = isEdit
+        ? api('PUT', 'quota-groups/' + grp.id, payload)
+        : api('POST', 'quota-groups', payload);
+      req.then(function () {
         closeModal();
-        toast('Quota group created');
+        toast(isEdit ? 'Quota group updated' : 'Quota group created');
         renderQuotas();
       }).catch(function (e) { setErr(e.message); });
     });
@@ -1150,6 +1201,39 @@
     if (act === 'new-outbound') return openOutboundModal();
     if (act === 'new-rule') return openRuleModal();
     if (act === 'new-group') return openGroupModal();
+    if (act === 'edit-rule') {
+      var found = (state.rules || []).find(function (item) { return item.id === el.dataset.rid; });
+      return openRuleModal(found || null);
+    }
+    if (act === 'edit-group') {
+      var grp = (state.groups || []).filter(function (x) { return x.id === el.dataset.gid; })[0];
+      if (grp) return openGroupModal(grp);
+    }
+    if (act === 'move-rule') {
+      return api('POST', 'routing/' + encodeURIComponent(el.dataset.rid) + '/move', {
+        direction: el.dataset.dir
+      }).then(function () { renderRouting(); }).catch(fail);
+    }
+    if (act === 'test-rule') {
+      var targetVal = (document.getElementById('rt-sim-target') || {}).value || '';
+      var portVal = (document.getElementById('rt-sim-port') || {}).value || '';
+      var ibVal = (document.getElementById('rt-sim-inbound') || {}).value || '';
+      var resBox = document.getElementById('rt-sim-result');
+      return api('POST', 'routing/test', {
+        target: targetVal.trim(),
+        port: portVal.trim(),
+        inbound_tag: ibVal.trim()
+      }).then(function (out) {
+        if (!resBox) return;
+        if (out.matched) {
+          resBox.innerHTML = 'Matched Rule: <b>' + esc(out.rule_name || out.rule_id) + '</b> → Outbound: <span class="tag">' + esc(out.outbound_tag) + '</span> (' + esc(out.reason) + ')';
+        } else {
+          resBox.innerHTML = 'No rule matched → Fallback Outbound: <span class="tag soft">' + esc(out.outbound_tag) + '</span> (' + esc(out.reason) + ')';
+        }
+      }).catch(function (e) {
+        if (resBox) resBox.textContent = 'Error: ' + e.message;
+      });
+    }
     if (act === 'new-node') return openNodeModal();
     if (act === 'new-token') return openTokenModal();
     if (act === 'show-xcfg') return openXrayConfigModal();

@@ -153,6 +153,12 @@ func Normalize(protocol string, o *Options) {
 	if protocol != "vless" && protocol != "trojan" {
 		o.Fallbacks = nil
 	}
+	if o.Network == "xhttp" && o.XhttpMode == "" {
+	o.XhttpMode = "auto"
+}
+if o.Network != "xhttp" {
+	o.XhttpMode = ""
+}
 }
 
 func ValidateInbound(in store.Inbound, o Options) error {

@@ -3,7 +3,7 @@ name: Release FastAsiaPanel
 on:
   push:
     tags:
-      - 'v*'
+      - 'v[0-9]*'
 
 permissions:
   contents: write
@@ -24,14 +24,21 @@ jobs:
       - name: Build and package archives
         run: |
           mkdir -p dist
+          VERSION="${GITHUB_REF_NAME#v}"
+
           for ARCH in amd64 arm64; do
             PKG_DIR="build_${ARCH}/fastasiapanel"
             mkdir -p "${PKG_DIR}/bin"
 
-            CGO_ENABLED=0 GOOS=linux GOARCH="${ARCH}" go build -ldflags="-s -w" -o "${PKG_DIR}/fastasiapanel" ./cmd/panel
+            CGO_ENABLED=0 GOOS=linux GOARCH="${ARCH}" go build \
+              -trimpath \
+              -ldflags="-s -w -X main.version=${VERSION}" \
+              -o "${PKG_DIR}/fastasiapanel" \
+              ./cmd/panel
 
             if [ -d "scripts" ]; then
               cp -r scripts "${PKG_DIR}/"
+              chmod +x "${PKG_DIR}/scripts/"*.sh 2>/dev/null || true
             fi
 
             tar -czf "dist/fastasiapanel-linux-${ARCH}.tar.gz" -C "build_${ARCH}" fastasiapanel

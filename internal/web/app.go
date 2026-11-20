@@ -257,6 +257,9 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST "+b+"/api/routing/preset", req(a.applyRoutingPreset))
 	mux.HandleFunc("POST "+b+"/api/routing/{id}/toggle", req(a.toggleRouting))
 	mux.HandleFunc("DELETE "+b+"/api/routing/{id}", req(a.deleteRouting))
+	mux.HandleFunc("PUT "+b+"/api/routing/{id}", req(a.updateRouting))
+	mux.HandleFunc("POST "+b+"/api/routing/{id}/move", req(a.moveRouting))
+	mux.HandleFunc("POST "+b+"/api/routing/test", req(a.testRoutingRule))
 
 	mux.HandleFunc("GET "+b+"/api/quota-groups", a.protect("inbounds:read", a.listQuotaGroups))
 	mux.HandleFunc("POST "+b+"/api/quota-groups", a.protect("inbounds:write", a.createQuotaGroup))
@@ -1150,6 +1153,243 @@ func (a *App) deleteRouting(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	a.finish(w, err, map[string]bool{"ok": true})
+}
+
+func cleanStringSlice(items []string) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		v := strings.TrimSpace(item)
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func (a *App) updateRouting(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req store.RoutingRule
+	if !decode(w, r, &req) {
+		return
+	}
+	req.Remark = strings.TrimSpace(req.Remark)
+	req.OutboundTag = strings.TrimSpace(req.OutboundTag)
+	req.Port = strings.TrimSpace(req.Port)
+	req.Domains = cleanStringSlice(req.Domains)
+	req.IPs = cleanStringSlice(req.IPs)
+	req.InboundTags = cleanStringSlice(req.InboundTags)
+	req.Protocol = cleanStringSlice(req.Protocol)
+
+	if req.OutboundTag == "" {
+		fail(w, http.StatusBadRequest, "outbound_tag is required")
+		return
+	}
+	if req.Remark == "" {
+		req.Remark = req.OutboundTag + " rule"
+	}
+
+	err := a.st.Update(func(s *store.State) error {
+		for i := range s.RoutingRules {
+			if s.RoutingRules[i].ID == id {
+				req.ID = id
+				req.Enable = s.RoutingRules[i].Enable
+				s.RoutingRules[i] = req
+				return nil
+			}
+		}
+		return errNotFound
+	})
+	a.finish(w, err, map[string]bool{"ok": true})
+}
+
+func (a *App) moveRouting(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Direction string `json:"direction"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	err := a.st.Update(func(s *store.State) error {
+		idx := -1
+		for i := range s.RoutingRules {
+			if s.RoutingRules[i].ID == id {
+				idx = i
+				break
+			}
+		}
+		if idx == -1 {
+			return errNotFound
+		}
+		delta := -1
+		if req.Direction == "down" {
+			delta = 1
+		}
+		target := idx + delta
+		if target < 0 || target >= len(s.RoutingRules) {
+			return nil
+		}
+		s.RoutingRules[idx], s.RoutingRules[target] = s.RoutingRules[target], s.RoutingRules[idx]
+		if s.RoutingRules[idx].Priority == s.RoutingRules[target].Priority {
+			s.RoutingRules[idx].Priority = (target + 1) * 10
+			s.RoutingRules[target].Priority = (idx + 1) * 10
+		}
+		return nil
+	})
+	a.finish(w, err, map[string]bool{"ok": true})
+}
+
+func (a *App) testRoutingRule(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Target     string `json:"target"`
+		Port       string `json:"port"`
+		InboundTag string `json:"inbound_tag"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	rawTarget := strings.TrimSpace(req.Target)
+	port := strings.TrimSpace(req.Port)
+	inbound := strings.TrimSpace(req.InboundTag)
+
+	if rawTarget == "" && port == "" && inbound == "" {
+		fail(w, http.StatusBadRequest, "target, port, or inbound_tag is required")
+		return
+	}
+
+	host := rawTarget
+	if host != "" && port == "" && strings.Contains(rawTarget, ":") && !strings.Contains(rawTarget, "::") {
+		parts := strings.SplitN(rawTarget, ":", 2)
+		host = strings.TrimSpace(parts[0])
+		if port == "" {
+			port = strings.TrimSpace(parts[1])
+		}
+	}
+
+	snap := a.st.Snapshot()
+	rules := make([]store.RoutingRule, len(snap.RoutingRules))
+	copy(rules, snap.RoutingRules)
+
+	for _, rl := range rules {
+		if !rl.Enable {
+			continue
+		}
+		if len(rl.InboundTags) > 0 && inbound != "" && !containsFold(rl.InboundTags, inbound) {
+			continue
+		}
+		if len(rl.InboundTags) > 0 && inbound == "" {
+			continue
+		}
+		if rl.Port != "" && port != "" && !portMatches(rl.Port, port) {
+			continue
+		}
+		if len(rl.Domains) > 0 && host != "" && matchAnyPattern(rl.Domains, host) {
+			reply(w, http.StatusOK, map[string]any{
+				"matched":      true,
+				"rule_id":      rl.ID,
+				"rule_name":    rl.Remark,
+				"outbound_tag": rl.OutboundTag,
+				"reason":       "Matched domain rule",
+			})
+			return
+		}
+		if len(rl.IPs) > 0 && host != "" && matchAnyPattern(rl.IPs, host) {
+			reply(w, http.StatusOK, map[string]any{
+				"matched":      true,
+				"rule_id":      rl.ID,
+				"rule_name":    rl.Remark,
+				"outbound_tag": rl.OutboundTag,
+				"reason":       "Matched IP/CIDR rule",
+			})
+			return
+		}
+		if len(rl.Domains) == 0 && len(rl.IPs) == 0 && (rl.Port != "" || len(rl.InboundTags) > 0) {
+			reply(w, http.StatusOK, map[string]any{
+				"matched":      true,
+				"rule_id":      rl.ID,
+				"rule_name":    rl.Remark,
+				"outbound_tag": rl.OutboundTag,
+				"reason":       "Matched port/inbound rule",
+			})
+			return
+		}
+	}
+
+	reply(w, http.StatusOK, map[string]any{
+		"matched":      false,
+		"outbound_tag": "direct",
+		"reason":       "No custom rule matched; fallback to default/direct outbound",
+	})
+}
+
+func containsFold(list []string, target string) bool {
+	for _, s := range list {
+		if strings.EqualFold(strings.TrimSpace(s), target) {
+			return true
+		}
+	}
+	return false
+}
+
+func portMatches(rulePorts, targetPort string) bool {
+	for _, p := range strings.Split(rulePorts, ",") {
+		p = strings.TrimSpace(p)
+		if p == targetPort {
+			return true
+		}
+		if strings.Contains(p, "-") {
+			bounds := strings.SplitN(p, "-", 2)
+			a, errA := strconv.Atoi(strings.TrimSpace(bounds[0]))
+			b, errB := strconv.Atoi(strings.TrimSpace(bounds[1]))
+			t, errT := strconv.Atoi(strings.TrimSpace(targetPort))
+			if errA == nil && errB == nil && errT == nil && t >= a && t <= b {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func matchAnyPattern(patterns []string, val string) bool {
+	v := strings.ToLower(strings.TrimSpace(val))
+	for _, raw := range patterns {
+		p := strings.ToLower(strings.TrimSpace(raw))
+		if p == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(p, "domain:"):
+			d := strings.TrimPrefix(p, "domain:")
+			if v == d || strings.HasSuffix(v, "."+d) {
+				return true
+			}
+		case strings.HasPrefix(p, "full:"):
+			if v == strings.TrimPrefix(p, "full:") {
+				return true
+			}
+		case strings.HasPrefix(p, "geosite:"):
+			site := strings.TrimPrefix(p, "geosite:")
+			if strings.Contains(v, site) {
+				return true
+			}
+		case strings.HasPrefix(p, "geoip:"):
+			ipTag := strings.TrimPrefix(p, "geoip:")
+			if ipTag == "ir" && strings.HasSuffix(v, ".ir") {
+				return true
+			}
+		default:
+			if strings.Contains(p, "/") {
+				if _, ipNet, err := net.ParseCIDR(p); err == nil {
+					if parsedIP := net.ParseIP(v); parsedIP != nil && ipNet.Contains(parsedIP) {
+						return true
+					}
+				}
+			} else if v == p || strings.HasSuffix(v, "."+p) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (a *App) listQuotaGroups(w http.ResponseWriter, r *http.Request) {

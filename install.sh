@@ -11,6 +11,7 @@ ENV_FILE="${CONFIG_DIR}/${APP_NAME}.env"
 RESULT_FILE="${CONFIG_DIR}/install-result.env"
 BIN_PATH="/usr/local/bin/${APP_NAME}"
 CLI_PATH="/usr/local/bin/${CLI_NAME}"
+XRAY_BIN="${APP_DIR}/bin/xray"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 
 RED='\033[0;31m'
@@ -43,8 +44,14 @@ detect_os_and_arch() {
     local raw_arch
     raw_arch="$(uname -m)"
     case "${raw_arch}" in
-        x86_64|amd64)  ARCH="amd64" ;;
-        aarch64|arm64) ARCH="arm64" ;;
+        x86_64|amd64)
+            ARCH="amd64"
+            XRAY_ARCH="64"
+            ;;
+        aarch64|arm64)
+            ARCH="arm64"
+            XRAY_ARCH="arm64-v8a"
+            ;;
         *)
             log_err "Unsupported CPU architecture: ${raw_arch}"
             exit 1
@@ -63,7 +70,7 @@ install_dependencies() {
     elif command -v yum >/dev/null 2>&1; then
         yum install -y -q curl wget tar unzip socat cronie ca-certificates openssl >/dev/null
     else
-        log_warn "Unknown package manager; ensure curl, tar, socat, and openssl are installed."
+        log_warn "Unknown package manager; ensure curl, tar, unzip, socat, and openssl are installed."
     fi
 }
 
@@ -120,6 +127,7 @@ normalize_web_base_path() {
 detect_server_ip() {
     SERVER_IP="$(curl -4 -fsSL --max-time 5 https://api.ipify.org 2>/dev/null || \
                  curl -4 -fsSL --max-time 5 https://ifconfig.me 2>/dev/null || \
+                 curl -6 -fsSL --max-time 5 https://api64.ipify.org 2>/dev/null || \
                  hostname -I 2>/dev/null | awk '{print $1}')"
     SERVER_IP="${SERVER_IP:-127.0.0.1}"
 }
@@ -131,21 +139,102 @@ get_latest_version() {
     fi
 
     local api_url="https://api.github.com/repos/${REPO}/releases/latest"
-    VERSION="$(curl -fsSL "${api_url}" | grep -Po '"tag_name":\s*"\K[^"]+' | head -n 1 || true)"
+    VERSION="$(curl -fsSL --max-time 10 "${api_url}" | grep -Po '"tag_name":\s*"\K[^"]+' | head -n 1 || true)"
+
+    if [[ -z "${VERSION}" && -f "cmd/panel/main.go" ]]; then
+        VERSION="$(grep -E 'var version\s*=' cmd/panel/main.go | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)"
+    fi
+
     if [[ -z "${VERSION}" ]]; then
-        log_err "Failed to fetch latest release version from GitHub."
+        log_err "Failed to determine release version from GitHub or local source."
         exit 1
     fi
 }
 
+install_xray_core() {
+    mkdir -p "${APP_DIR}/bin"
+
+    if [[ "${FORCE_XRAY_UPDATE:-0}" != "1" && -x "${XRAY_BIN}" ]] && "${XRAY_BIN}" version >/dev/null 2>&1; then
+        log_info "Xray core already installed: $("${XRAY_BIN}" version | head -n 1)"
+        return
+    fi
+
+    log_info "Installing Xray core (${ARCH} -> ${XRAY_ARCH})..."
+    local xray_tag="${XRAY_VERSION:-}"
+    if [[ -z "${xray_tag}" ]]; then
+        xray_tag="$(curl -fsSL --max-time 10 https://api.github.com/repos/XTLS/Xray-core/releases/latest \
+            | grep -Po '"tag_name":\s*"\K[^"]+' | head -n 1 || true)"
+    fi
+
+    if [[ -z "${xray_tag}" ]]; then
+        log_err "Failed to fetch latest Xray-core release tag from GitHub."
+        exit 1
+    fi
+
+    local tmp_xray
+    tmp_xray="$(mktemp -d)"
+    local zip_name="Xray-linux-${XRAY_ARCH}.zip"
+    local dl_url="https://github.com/XTLS/Xray-core/releases/download/${xray_tag}/${zip_name}"
+
+    curl -fL --progress-bar "${dl_url}" -o "${tmp_xray}/${zip_name}"
+    unzip -q "${tmp_xray}/${zip_name}" -d "${tmp_xray}"
+
+    if [[ ! -f "${tmp_xray}/xray" ]]; then
+        rm -rf "${tmp_xray}"
+        log_err "Xray archive is missing xray binary."
+        exit 1
+    fi
+
+    systemctl stop "${APP_NAME}" 2>/dev/null || true
+    install -m 0755 "${tmp_xray}/xray" "${XRAY_BIN}"
+    [[ -f "${tmp_xray}/geoip.dat" ]] && install -m 0644 "${tmp_xray}/geoip.dat" "${APP_DIR}/bin/geoip.dat"
+    [[ -f "${tmp_xray}/geosite.dat" ]] && install -m 0644 "${tmp_xray}/geosite.dat" "${APP_DIR}/bin/geosite.dat"
+    rm -rf "${tmp_xray}"
+
+    log_info "Xray core installed: $("${XRAY_BIN}" version | head -n 1)"
+}
+
+build_binary_from_source() {
+    local clean_ver="${VERSION#v}"
+    local ldflags="-s -w -X main.version=${clean_ver}"
+
+    if ! command -v go >/dev/null 2>&1; then
+        log_err "Go is required to build from source with ldflags."
+        exit 1
+    fi
+
+    log_info "Building ${APP_NAME} (${clean_ver}) with ldflags: ${ldflags}"
+    local tmp_bin
+    tmp_bin="$(mktemp)"
+    CGO_ENABLED=0 go build -trimpath -ldflags "${ldflags}" -o "${tmp_bin}" ./cmd/panel
+
+    systemctl stop "${APP_NAME}" 2>/dev/null || true
+    mkdir -p "${APP_DIR}/bin" "${CONFIG_DIR}"
+    install -m 0755 "${tmp_bin}" "${BIN_PATH}"
+    rm -f "${tmp_bin}"
+
+    if [[ -d "scripts" ]]; then
+        mkdir -p "${APP_DIR}/scripts"
+        cp -rf scripts/. "${APP_DIR}/scripts/"
+    fi
+}
+
 download_and_install_binary() {
+    mkdir -p "${APP_DIR}/bin" "${CONFIG_DIR}"
+
+    if [[ "${BUILD_FROM_SOURCE:-0}" == "1" && -f "go.mod" && -d "cmd/panel" ]]; then
+        build_binary_from_source
+        return
+    fi
+
     log_info "Got ${APP_NAME} version: ${VERSION}, beginning installation..."
     local tmp_dir
     tmp_dir="$(mktemp -d)"
     trap 'rm -rf "${tmp_dir:-}"' RETURN
 
+    local clean_tag="${VERSION}"
     local asset_name="${APP_NAME}-linux-${ARCH}.tar.gz"
-    local base_url="https://github.com/${REPO}/releases/download/${VERSION}"
+    local base_url="https://github.com/${REPO}/releases/download/${clean_tag}"
     local archive_path="${tmp_dir}/${asset_name}"
     local sha_path="${tmp_dir}/${asset_name}.sha256"
 
@@ -174,23 +263,12 @@ download_and_install_binary() {
         exit 1
     fi
 
-    local bin_backup=""
-    if [[ -d "${APP_DIR}/bin" ]]; then
-        bin_backup="${tmp_dir}/bin_backup"
-        cp -a "${APP_DIR}/bin" "${bin_backup}"
-    fi
-
     systemctl stop "${APP_NAME}" 2>/dev/null || true
-
-    mkdir -p "${APP_DIR}/bin" "${CONFIG_DIR}"
     install -m 0755 "${extracted_bin}" "${BIN_PATH}"
 
     if [[ -d "${tmp_dir}/${APP_NAME}/scripts" ]]; then
-        cp -rf "${tmp_dir}/${APP_NAME}/scripts" "${APP_DIR}/"
-    fi
-
-    if [[ -n "${bin_backup}" && -d "${bin_backup}" ]]; then
-        cp -an "${bin_backup}/." "${APP_DIR}/bin/"
+        mkdir -p "${APP_DIR}/scripts"
+        cp -rf "${tmp_dir}/${APP_NAME}/scripts/." "${APP_DIR}/scripts/"
     fi
 
     trap - RETURN
@@ -200,6 +278,8 @@ download_and_install_binary() {
 install_cli_script() {
     if [[ -f "${APP_DIR}/scripts/fastasian.sh" ]]; then
         install -m 0755 "${APP_DIR}/scripts/fastasian.sh" "${CLI_PATH}"
+    elif [[ -f "scripts/fastasian.sh" ]]; then
+        install -m 0755 "scripts/fastasian.sh" "${CLI_PATH}"
     elif curl -fsSL "https://raw.githubusercontent.com/${REPO}/main/scripts/fastasian.sh" -o "${CLI_PATH}" 2>/dev/null; then
         chmod 0755 "${CLI_PATH}"
     else
@@ -343,7 +423,7 @@ FAP_BASE_PATH=${go_base_path}
 FAP_DB_TYPE=${db_type_val}
 FAP_DB_PATH=${db_path_val}
 FAP_DB_DSN=${db_dsn_val}
-FAP_XRAY_BIN=${APP_DIR}/bin/xray
+FAP_XRAY_BIN=${XRAY_BIN}
 FAP_XRAY_CONFIG=${CONFIG_DIR}/xray.json
 FAP_PUBLIC_HOST=${public_host_val}
 FAP_TLS_CERT=${SSL_CERT_PATH}
@@ -425,11 +505,13 @@ print_install_summary() {
     ACCESS_URL="${proto}://${url_host}:${PANEL_PORT}${clean_path}"
 
     cat > "${RESULT_FILE}" <<EOF
+PANEL_VERSION=${VERSION}
 PANEL_USERNAME=${ADMIN_USER}
 PANEL_PASSWORD=${ADMIN_PASS}
 PANEL_PORT=${PANEL_PORT}
 PANEL_WEB_BASE_PATH=${WEB_BASE_PATH}
 DB_TYPE=${DB_TYPE}
+XRAY_BIN=${XRAY_BIN}
 SSL_ENABLED=$( [[ "${proto}" == "https" ]] && echo "true" || echo "false" )
 ACCESS_URL=${ACCESS_URL}
 EOF
@@ -439,11 +521,13 @@ EOF
     echo "═══════════════════════════════════════════"
     echo "     FastAsiaPanel Installation Complete!    "
     echo "═══════════════════════════════════════════"
+    echo "Version:     ${VERSION}"
     echo "Username:    ${ADMIN_USER}"
     echo "Password:    ${ADMIN_PASS}"
     echo "Port:        ${PANEL_PORT}"
     echo "WebBasePath: ${WEB_BASE_PATH}"
     echo "Database:    ${DB_TYPE}"
+    echo "Xray Core:   ${XRAY_BIN}"
     echo "SSL Mode:    ${proto^^}"
     echo "Access URL:  ${ACCESS_URL}"
     echo "═══════════════════════════════════════════"
@@ -455,6 +539,7 @@ main() {
     install_dependencies
     detect_server_ip
     get_latest_version
+    install_xray_core
     download_and_install_binary
     install_cli_script
     collect_user_configuration
