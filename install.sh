@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -u
+set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -15,6 +15,7 @@ if ! command -v infocmp >/dev/null 2>&1 || ! infocmp "${TERM:-}" >/dev/null 2>&1
   export TERM=xterm-256color
 fi
 
+REPO_URL="https://github.com/VahidDashtbani/fastasiapanel.git"
 CONF_DIR="/etc/fastasiapanel"
 ENV_FILE="${CONF_DIR}/panel.env"
 DATA_DIR="/var/lib/fastasiapanel"
@@ -24,40 +25,10 @@ BIN_PATH="/usr/local/bin/fastasiapanel"
 CLI_PATH="/usr/local/bin/fastasian"
 SERVICE_NAME="fastasiapanel"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-INSTALL_URL="https://raw.githubusercontent.com/VahidDashtbani/fastasiapanel/main/install.sh"
-CLI_URL="https://raw.githubusercontent.com/VahidDashtbani/fastasiapanel/main/scripts/fastasian.sh"
 
-LOGI() { echo -e "${GREEN}[INF]${NC} $*"; }
-LOGW() { echo -e "${YELLOW}[WRN]${NC} $*"; }
-LOGE() { echo -e "${RED}[ERR]${NC} $*"; }
-
-safe_clear() {
-  clear 2>/dev/null || printf '\033[2J\033[H'
-}
-
-load_env() {
-  if [[ -f "${ENV_FILE}" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "${ENV_FILE}"
-    set +a
-  fi
-}
-
-save_env_key() {
-  local key="$1"
-  local val="$2"
-  mkdir -p "${CONF_DIR}"
-  touch "${ENV_FILE}"
-  chmod 600 "${ENV_FILE}"
-  local escaped
-  escaped=$(printf '%s' "${val}" | sed 's/[&/\]/\\&/g')
-  if grep -q "^${key}=" "${ENV_FILE}"; then
-    sed -i "s|^${key}=.*|${key}=\"${escaped}\"|" "${ENV_FILE}"
-  else
-    echo "${key}=\"${escaped}\"" >> "${ENV_FILE}"
-  fi
-}
+log_info() { echo -e "${GREEN}[INF]${NC} $*"; }
+log_warn() { echo -e "${YELLOW}[WRN]${NC} $*"; }
+log_err()  { echo -e "${RED}[ERR]${NC} $*"; }
 
 gen_rand_str() {
   local len="${1:-12}"
@@ -65,28 +36,6 @@ gen_rand_str() {
     openssl rand -base64 $((len * 2)) | tr -dc 'a-zA-Z0-9' | head -c "${len}"
   else
     tr -dc 'a-zA-Z0-9' </dev/urandom | head -c "${len}"
-  fi
-}
-
-confirm() {
-  local prompt="$1"
-  local def="${2:-n}"
-  local ans=""
-  if [[ -r /dev/tty ]]; then
-    read -rp "${prompt} [${def}]: " ans </dev/tty
-  else
-    read -rp "${prompt} [${def}]: " ans
-  fi
-  [[ -z "${ans}" ]] && ans="${def}"
-  [[ "${ans,,}" == "y" || "${ans,,}" == "yes" ]]
-}
-
-pause_key() {
-  echo ""
-  if [[ -r /dev/tty ]]; then
-    read -rp "Press Enter to continue..." _ </dev/tty
-  else
-    read -rp "Press Enter to continue..." _
   fi
 }
 
@@ -108,669 +57,173 @@ server_ip() {
   hostname -I 2>/dev/null | awk '{print $1}'
 }
 
-is_port_in_use() {
-  local port="$1"
-  if command -v ss >/dev/null 2>&1; then
-    ss -ltn 2>/dev/null | awk -v p=":${port}$" '$4 ~ p {found=1} END {exit !found}'
-    return
+install_deps() {
+  log_info "Checking system dependencies..."
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -y
+    apt-get install -y curl git ca-certificates build-essential openssl
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y curl git ca-certificates gcc make openssl
+  elif command -v pacman >/dev/null 2>&1; then
+    pacman -Sy --noconfirm curl git ca-certificates base-devel openssl
   fi
-  return 1
+
+  if ! command -v go >/dev/null 2>&1; then
+    log_info "Installing Go..."
+    local go_ver="1.23.4"
+    local arch
+    arch=$(uname -m)
+    case "${arch}" in
+      x86_64|amd64) arch="amd64" ;;
+      aarch64|arm64) arch="arm64" ;;
+      *) log_err "Unsupported architecture: ${arch}"; exit 1 ;;
+    esac
+    curl -fsSL "https://go.dev/dl/go${go_ver}.linux-${arch}.tar.gz" -o /tmp/go.tgz
+    rm -rf /usr/local/go
+    tar -C /usr/local -xzf /tmp/go.tgz
+    rm -f /tmp/go.tgz
+  fi
+
+  export PATH="/usr/local/go/bin:${PATH}"
+  log_info "Go version: $(go version)"
 }
 
-is_domain() {
-  [[ "$1" =~ ^([A-Za-z0-9](-*[A-Za-z0-9])*\.)+(xn--[a-z0-9]{2,}|[A-Za-z]{2,})$ ]]
+sync_source() {
+  log_info "Syncing FastAsiaPanel source from ${REPO_URL}..."
+  mkdir -p "${APP_DIR}" "${DATA_DIR}" "${CONF_DIR}"
+  if [[ -d "${SRC_DIR}/.git" ]]; then
+    git -C "${SRC_DIR}" fetch --all --prune
+    git -C "${SRC_DIR}" reset --hard origin/main
+  else
+    rm -rf "${SRC_DIR}"
+    git clone --depth 1 "${REPO_URL}" "${SRC_DIR}"
+  fi
 }
 
-panel_installed() {
-  [[ -x "${BIN_PATH}" && -f "${SERVICE_FILE}" ]]
+build_panel() {
+  log_info "Building fastasiapanel binary..."
+  cd "${SRC_DIR}"
+  go mod tidy >/dev/null 2>&1 || true
+  go build -o "${BIN_PATH}" .
+  chmod 755 "${BIN_PATH}"
+  log_info "Binary built at ${BIN_PATH}"
 }
 
-require_installed() {
-  if ! panel_installed; then
-    LOGE "FastAsiaPanel is not installed."
-    echo -e "Install it first with:"
-    echo -e "  ${CYAN}curl -fsSL \"${INSTALL_URL}?v=\$(date +%s)\" -o /tmp/install_fap.sh && bash /tmp/install_fap.sh${NC}"
+setup_env() {
+  if [[ -f "${ENV_FILE}" ]]; then
+    log_info "Existing ${ENV_FILE} found; keeping current configuration."
+    return 0
+  fi
+
+  local port base_path db_type admin_user admin_pass
+  port="2053"
+  base_path="/$(gen_rand_str 10)"
+  db_type="sqlite"
+  admin_user="admin"
+  admin_pass="$(gen_rand_str 14)"
+
+  if [[ -r /dev/tty ]]; then
+    local input_port="" input_base="" input_db=""
+    read -rp "Panel Port [default 2053]: " input_port </dev/tty || true
+    [[ -n "${input_port}" ]] && port="${input_port}"
+
+    read -rp "Web Base Path [default ${base_path}]: " input_base </dev/tty || true
+    if [[ -n "${input_base}" ]]; then
+      [[ "${input_base:0:1}" != "/" ]] && input_base="/${input_base}"
+      base_path="${input_base%/}"
+    fi
+
+    read -rp "Database Type (sqlite / postgres) [default sqlite]: " input_db </dev/tty || true
+    [[ "${input_db,,}" == "postgres" ]] && db_type="postgres"
+  fi
+
+  cat <<EOF > "${ENV_FILE}"
+FAP_PORT="${port}"
+FAP_ADDR="0.0.0.0:${port}"
+FAP_LISTEN="0.0.0.0:${port}"
+FAP_BASE_PATH="${base_path}"
+FAP_DB="${db_type}"
+FAP_DATA="${DATA_DIR}/fastasiapanel.db"
+FAP_ADMIN_USER="${admin_user}"
+FAP_ADMIN_PASS="${admin_pass}"
+EOF
+  chmod 600 "${ENV_FILE}"
+  log_info "Configuration written to ${ENV_FILE}"
+}
+
+setup_service() {
+  log_info "Configuring systemd service (${SERVICE_NAME}.service)..."
+  cat <<EOF > "${SERVICE_FILE}"
+[Unit]
+Description=FastAsiaPanel Xray Management Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=${DATA_DIR}
+EnvironmentFile=-${ENV_FILE}
+ExecStart=${BIN_PATH}
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1 || true
+  systemctl restart "${SERVICE_NAME}"
+  sleep 2
+
+  if systemctl is-active --quiet "${SERVICE_NAME}"; then
+    log_info "Service ${SERVICE_NAME} is running."
+  else
+    log_warn "Service ${SERVICE_NAME} is not active yet. Check logs with: journalctl -u ${SERVICE_NAME} -n 50 --no-pager"
+  fi
+}
+
+install_cli() {
+  if [[ -f "${SRC_DIR}/scripts/fastasian.sh" ]]; then
+    install -m 755 "${SRC_DIR}/scripts/fastasian.sh" "${CLI_PATH}"
+    log_info "CLI manager installed at ${CLI_PATH}"
+  else
+    log_err "scripts/fastasian.sh not found in ${SRC_DIR}"
     exit 1
   fi
 }
 
-panel_running() {
-  systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null
-}
+show_summary() {
+  set -a
+  # shellcheck disable=SC1090
+  [[ -f "${ENV_FILE}" ]] && source "${ENV_FILE}"
+  set +a
 
-panel_enabled() {
-  systemctl is-enabled --quiet "${SERVICE_NAME}" 2>/dev/null
-}
-
-xray_running() {
-  pgrep -f "(^|/)(xray|xray-linux)" >/dev/null 2>&1
-}
-
-show_status_summary() {
-  if ! panel_installed; then
-    echo -e "  Panel State    : ${RED}Not Installed${NC}"
-    echo -e "  Xray Core      : ${YELLOW}N/A (Panel not installed)${NC}"
-    return 0
-  fi
-
-  if panel_running; then
-    echo -e "  Panel State    : ${GREEN}● Running${NC}"
-  else
-    echo -e "  Panel State    : ${RED}● Stopped${NC}"
-  fi
-
-  if panel_enabled; then
-    echo -e "  Autostart      : ${GREEN}Enabled${NC}"
-  else
-    echo -e "  Autostart      : ${YELLOW}Disabled${NC}"
-  fi
-
-  if xray_running; then
-    echo -e "  Xray Core      : ${GREEN}● Running${NC}"
-  else
-    echo -e "  Xray Core      : ${YELLOW}● Idle / Stopped${NC}"
-  fi
-}
-
-start_panel() {
-  require_installed
-  if panel_running; then
-    LOGI "FastAsiaPanel is already running."
-    return 0
-  fi
-  systemctl start "${SERVICE_NAME}"
-  sleep 2
-  if panel_running; then
-    LOGI "FastAsiaPanel started successfully."
-  else
-    LOGE "Failed to start FastAsiaPanel. Check logs with: fastasian log"
-    return 1
-  fi
-}
-
-stop_panel() {
-  require_installed
-  if ! panel_running; then
-    LOGW "FastAsiaPanel is already stopped."
-    return 0
-  fi
-  systemctl stop "${SERVICE_NAME}"
-  sleep 1
-  if ! panel_running; then
-    LOGI "FastAsiaPanel stopped successfully."
-  else
-    LOGE "Failed to stop FastAsiaPanel."
-    return 1
-  fi
-}
-
-restart_panel() {
-  require_installed
-  systemctl restart "${SERVICE_NAME}"
-  sleep 2
-  if panel_running; then
-    LOGI "FastAsiaPanel restarted successfully."
-  else
-    LOGE "FastAsiaPanel failed to restart. Check logs with: fastasian log"
-    return 1
-  fi
-}
-
-restart_xray() {
-  require_installed
-  load_env
-  local port="${FAP_PORT:-2053}"
-  local base="${FAP_BASE_PATH:-}"
-  if curl -fsS --max-time 4 -X POST "http://127.0.0.1:${port}${base}/api/xray/restart" >/dev/null 2>&1; then
-    LOGI "Xray Core restart signal sent via panel API."
-    return 0
-  fi
-  LOGW "Direct Xray API endpoint unavailable; restarting ${SERVICE_NAME} service..."
-  restart_panel
-}
-
-enable_autostart() {
-  require_installed
-  systemctl enable "${SERVICE_NAME}" && LOGI "Autostart enabled."
-}
-
-disable_autostart() {
-  require_installed
-  systemctl disable "${SERVICE_NAME}" && LOGI "Autostart disabled."
-}
-
-show_logs_menu() {
-  while true; do
-    echo ""
-    echo -e "${CYAN}--- Logs Management ---${NC}"
-    echo "1) Follow live logs (journalctl -f)"
-    echo "2) View last 80 log lines"
-    echo "3) Vacuum / trim old journal logs"
-    echo "0) Back"
-    local opt=""
-    read -rp "Select option [0-3]: " opt </dev/tty
-    case "${opt}" in
-      1) journalctl -u "${SERVICE_NAME}" -e --no-pager -f; break ;;
-      2) journalctl -u "${SERVICE_NAME}" -n 80 --no-pager; pause_key ;;
-      3)
-        journalctl --rotate >/dev/null 2>&1 || true
-        journalctl --vacuum-time=1d >/dev/null 2>&1 || true
-        LOGI "Old journal logs trimmed."
-        pause_key
-        ;;
-      0) return 0 ;;
-      *) LOGE "Invalid selection." ;;
-    esac
-  done
-}
-
-show_settings() {
-  require_installed
-  load_env
   local ip
-  ip=$(server_ip)
-  local port="${FAP_PORT:-2053}"
-  local base="${FAP_BASE_PATH:-}"
-  local db="${FAP_DB:-sqlite}"
-  local user="${FAP_ADMIN_USER:-admin}"
-  local pass="${FAP_ADMIN_PASS:-********}"
-
+  ip=$(server_ip || true)
   echo ""
   echo -e "${CYAN}========================================================${NC}"
-  echo -e "${BOLD}  FastAsiaPanel Configuration & Access Info${NC}"
+  echo -e "${BOLD}  FastAsiaPanel Installation Completed${NC}"
   echo -e "${CYAN}========================================================${NC}"
-  show_status_summary
-  echo -e "  Server IPv4    : ${CYAN}${ip:-unknown}${NC}"
-  echo -e "  Listen Port    : ${YELLOW}${port}${NC}"
-  echo -e "  Web Base Path  : ${YELLOW}${base:-/}${NC}"
-  echo -e "  Database Type  : ${YELLOW}${db}${NC}"
-  if [[ "${db}" == "postgres" ]]; then
-    local safe_dsn
-    safe_dsn=$(printf '%s' "${FAP_PG_DSN:-}" | sed -E 's|(://[^:/@]+:)[^@]+@|\1****@|')
-    echo -e "  Postgres DSN   : ${YELLOW}${safe_dsn:-not set}${NC}"
-  else
-    echo -e "  SQLite File    : ${YELLOW}${FAP_DATA:-${DATA_DIR}/fastasiapanel.db}${NC}"
-  fi
-  echo -e "  Admin Username : ${YELLOW}${user}${NC}"
-  echo -e "  Admin Password : ${YELLOW}${pass}${NC}"
-  if [[ -n "${ip}" ]]; then
-    echo -e "  Panel URL      : ${GREEN}http://${ip}:${port}${base}/${NC}"
-  fi
+  [[ -n "${ip}" ]] && echo -e "  Panel URL      : ${GREEN}http://${ip}:${FAP_PORT:-2053}${FAP_BASE_PATH:-}/admin/${NC}"
+  echo -e "  Listen Port    : ${YELLOW}${FAP_PORT:-2053}${NC}"
+  echo -e "  Web Base Path  : ${YELLOW}${FAP_BASE_PATH:-/}${NC}"
+  echo -e "  Database       : ${YELLOW}${FAP_DB:-sqlite}${NC}"
+  echo -e "  Admin Username : ${YELLOW}${FAP_ADMIN_USER:-admin}${NC}"
+  echo -e "  Admin Password : ${YELLOW}${FAP_ADMIN_PASS:-admin123}${NC}"
+  echo -e "  CLI Command    : ${CYAN}fastasian${NC}"
   echo -e "${CYAN}========================================================${NC}"
 }
 
-reset_credentials() {
-  require_installed
-  load_env
-  local new_user="" new_pass=""
-  read -rp "New Admin Username [empty = random]: " new_user </dev/tty
-  read -rp "New Admin Password [empty = random]: " new_pass </dev/tty
-  [[ -z "${new_user}" ]] && new_user="admin_$(gen_rand_str 5)"
-  [[ -z "${new_pass}" ]] && new_pass="$(gen_rand_str 14)"
-
-  save_env_key "FAP_ADMIN_USER" "${new_user}"
-  save_env_key "FAP_ADMIN_PASS" "${new_pass}"
-  load_env
-
-  (cd "${DATA_DIR}" && "${BIN_PATH}" reset-admin "${new_user}" "${new_pass}") >/dev/null 2>&1 || true
-  restart_panel
-  LOGI "Admin credentials updated."
-  show_settings
+main() {
+  echo -e "${CYAN}${BOLD}=== FastAsiaPanel Installer ===${NC}"
+  install_deps
+  sync_source
+  build_panel
+  setup_env
+  setup_service
+  install_cli
+  show_summary
 }
 
-reset_web_base_path() {
-  require_installed
-  load_env
-  local new_path=""
-  read -rp "New Web Base Path (e.g. /mysecret or empty = random): " new_path </dev/tty
-  if [[ -z "${new_path}" ]]; then
-    new_path="/$(gen_rand_str 10)"
-  elif [[ "${new_path:0:1}" != "/" ]]; then
-    new_path="/${new_path}"
-  fi
-  new_path="${new_path%/}"
-
-  save_env_key "FAP_BASE_PATH" "${new_path}"
-  restart_panel
-  LOGI "Web Base Path updated to: ${new_path}"
-  show_settings
-}
-
-change_panel_port() {
-  require_installed
-  load_env
-  local new_port=""
-  read -rp "New Panel Port [1-65535, empty = random]: " new_port </dev/tty
-  if [[ -z "${new_port}" ]]; then
-    while true; do
-      new_port=$(shuf -i 12000-58000 -n 1)
-      is_port_in_use "${new_port}" || break
-    done
-  fi
-  if ! [[ "${new_port}" =~ ^[0-9]+$ ]] || (( new_port < 1 || new_port > 65535 )); then
-    LOGE "Invalid port number."
-    return 1
-  fi
-
-  save_env_key "FAP_PORT" "${new_port}"
-  save_env_key "FAP_ADDR" "0.0.0.0:${new_port}"
-  save_env_key "FAP_LISTEN" "0.0.0.0:${new_port}"
-
-  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-    ufw allow "${new_port}/tcp" >/dev/null 2>&1 || true
-  fi
-
-  restart_panel
-  LOGI "Panel port changed to ${new_port}."
-  show_settings
-}
-
-update_panel() {
-  if ! confirm "Install or update FastAsiaPanel from GitHub?" "y"; then
-    LOGW "Operation cancelled."
-    return 0
-  fi
-  LOGI "Running installer from GitHub..."
-  bash <(curl -fsSL "${INSTALL_URL}?v=$(date +%s)")
-}
-
-update_cli_script() {
-  if ! confirm "Update the fastasian CLI script from GitHub?" "y"; then
-    LOGW "Update cancelled."
-    return 0
-  fi
-  local tmp_cli="/tmp/fastasian.sh.$$"
-  if curl -fsSL "${CLI_URL}?v=$(date +%s)" -o "${tmp_cli}" && [[ -s "${tmp_cli}" ]]; then
-    install -m 755 "${tmp_cli}" "${CLI_PATH}"
-    rm -f "${tmp_cli}"
-    LOGI "fastasian CLI updated. Re-running..."
-    exec "${CLI_PATH}"
-  else
-    rm -f "${tmp_cli}"
-    LOGE "Failed to download updated CLI script."
-    return 1
-  fi
-}
-
-update_geodata() {
-  require_installed
-  LOGI "Updating GeoIP and GeoSite files..."
-  mkdir -p /usr/local/share/xray
-  local ok=1
-  curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" -o /usr/local/share/xray/geoip.dat || ok=0
-  curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" -o /usr/local/share/xray/geosite.dat || ok=0
-  if [[ "${ok}" -eq 1 ]]; then
-    LOGI "GeoIP and GeoSite updated successfully."
-    restart_panel
-  else
-    LOGE "Failed to download one or more Geo data files."
-    return 1
-  fi
-}
-
-install_acme_if_needed() {
-  if [[ -x "${HOME}/.acme.sh/acme.sh" ]]; then
-    return 0
-  fi
-  LOGI "Installing acme.sh..."
-  curl -fsSL https://get.acme.sh | sh
-}
-
-ssl_menu() {
-  require_installed
-  while true; do
-    echo ""
-    echo -e "${CYAN}--- SSL Certificate Management (Let's Encrypt / acme.sh) ---${NC}"
-    echo "1) Issue SSL for Domain (standalone HTTP-01)"
-    echo "2) Issue short-lived SSL for Server IPv4"
-    echo "3) Force renew existing domain certificate"
-    echo "4) List certificates in /root/cert"
-    echo "0) Back"
-    local opt=""
-    read -rp "Select option [0-4]: " opt </dev/tty
-    case "${opt}" in
-      1)
-        local domain="" webport=""
-        read -rp "Enter domain name: " domain </dev/tty
-        domain="${domain// /}"
-        if ! is_domain "${domain}"; then
-          LOGE "Invalid domain name."
-          pause_key
-          continue
-        fi
-        read -rp "Standalone HTTP port [default 80]: " webport </dev/tty
-        webport="${webport:-80}"
-        if is_port_in_use "${webport}"; then
-          LOGE "Port ${webport} is currently in use."
-          pause_key
-          continue
-        fi
-        install_acme_if_needed || { pause_key; continue; }
-        mkdir -p "/root/cert/${domain}"
-        "${HOME}/.acme.sh/acme.sh" --set-default-ca --server letsencrypt --force
-        if "${HOME}/.acme.sh/acme.sh" --issue -d "${domain}" --standalone --httpport "${webport}" --force && \
-           "${HOME}/.acme.sh/acme.sh" --installcert --force -d "${domain}" \
-             --key-file "/root/cert/${domain}/privkey.pem" \
-             --fullchain-file "/root/cert/${domain}/fullchain.pem" \
-             --reloadcmd "systemctl restart ${SERVICE_NAME}"; then
-          chmod 600 "/root/cert/${domain}/privkey.pem"
-          chmod 644 "/root/cert/${domain}/fullchain.pem"
-          LOGI "SSL installed at /root/cert/${domain}/"
-        else
-          LOGE "Certificate issuance/installation failed."
-        fi
-        pause_key
-        ;;
-      2)
-        local ip webport=""
-        ip=$(server_ip)
-        if [[ -z "${ip}" ]]; then
-          LOGE "Could not detect public IPv4."
-          pause_key
-          continue
-        fi
-        read -rp "Standalone HTTP port for IP ${ip} [default 80]: " webport </dev/tty
-        webport="${webport:-80}"
-        if is_port_in_use "${webport}"; then
-          LOGE "Port ${webport} is currently in use."
-          pause_key
-          continue
-        fi
-        install_acme_if_needed || { pause_key; continue; }
-        mkdir -p "/root/cert/ip"
-        "${HOME}/.acme.sh/acme.sh" --set-default-ca --server letsencrypt --force
-        if "${HOME}/.acme.sh/acme.sh" --issue -d "${ip}" --standalone --server letsencrypt --certificate-profile shortlived --days 6 --httpport "${webport}" --force && \
-           "${HOME}/.acme.sh/acme.sh" --installcert --force -d "${ip}" \
-             --key-file "/root/cert/ip/privkey.pem" \
-             --fullchain-file "/root/cert/ip/fullchain.pem" \
-             --reloadcmd "systemctl restart ${SERVICE_NAME}"; then
-          chmod 600 "/root/cert/ip/privkey.pem"
-          chmod 644 "/root/cert/ip/fullchain.pem"
-          LOGI "Short-lived IP certificate installed at /root/cert/ip/"
-        else
-          LOGE "Failed to issue IP certificate."
-        fi
-        pause_key
-        ;;
-      3)
-        local dom=""
-        read -rp "Enter domain to renew: " dom </dev/tty
-        if [[ -n "${dom}" && -x "${HOME}/.acme.sh/acme.sh" ]]; then
-          "${HOME}/.acme.sh/acme.sh" --renew -d "${dom}" --force
-          pause_key
-        else
-          LOGE "Domain empty or acme.sh not installed."
-          pause_key
-        fi
-        ;;
-      4)
-        if [[ -d /root/cert ]]; then
-          ls -la /root/cert
-        else
-          LOGW "No /root/cert directory found."
-        fi
-        pause_key
-        ;;
-      0) return 0 ;;
-      *) LOGE "Invalid selection." ;;
-    esac
-  done
-}
-
-firewall_menu() {
-  load_env
-  local port="${FAP_PORT:-2053}"
-  while true; do
-    echo ""
-    echo -e "${CYAN}--- Firewall (UFW) Management ---${NC}"
-    echo "1) Enable UFW & allow SSH (22/tcp) + Panel Port (${port}/tcp)"
-    echo "2) Open custom port or range (e.g. 443/tcp or 10000-20000/udp)"
-    echo "3) Delete rule by number"
-    echo "4) Show UFW status"
-    echo "0) Back"
-    local opt=""
-    read -rp "Select option [0-4]: " opt </dev/tty
-    case "${opt}" in
-      1)
-        if ! command -v ufw >/dev/null 2>&1; then
-          LOGE "ufw is not installed."
-          pause_key
-          continue
-        fi
-        ufw allow 22/tcp >/dev/null 2>&1 || true
-        ufw allow "${port}/tcp" >/dev/null 2>&1 || true
-        ufw --force enable
-        pause_key
-        ;;
-      2)
-        local rule=""
-        read -rp "Enter port/rule (e.g. 443/tcp or 8443): " rule </dev/tty
-        if [[ -n "${rule}" ]]; then
-          ufw allow "${rule}"
-        else
-          LOGE "Rule cannot be empty."
-        fi
-        pause_key
-        ;;
-      3)
-        ufw status numbered
-        local num=""
-        read -rp "Enter rule number to delete: " num </dev/tty
-        if [[ "${num}" =~ ^[0-9]+$ ]]; then
-          ufw --force delete "${num}"
-        else
-          LOGE "Invalid rule number."
-        fi
-        pause_key
-        ;;
-      4)
-        ufw status verbose
-        pause_key
-        ;;
-      0) return 0 ;;
-      *) LOGE "Invalid selection." ;;
-    esac
-  done
-}
-
-bbr_menu() {
-  local conf_file="/etc/sysctl.d/99-fastasia-bbr.conf"
-  while true; do
-    local cur_cc cur_qdisc
-    cur_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
-    cur_qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "unknown")
-    echo ""
-    echo -e "${CYAN}--- TCP BBR Management (cc=${cur_cc}, qdisc=${cur_qdisc}) ---${NC}"
-    echo "1) Enable BBR + fq"
-    echo "2) Disable / restore previous congestion control"
-    echo "0) Back"
-    local opt=""
-    read -rp "Select option [0-2]: " opt </dev/tty
-    case "${opt}" in
-      1)
-        mkdir -p /etc/sysctl.d
-        {
-          echo "#prev:${cur_qdisc}:${cur_cc}"
-          echo "net.core.default_qdisc = fq"
-          echo "net.ipv4.tcp_congestion_control = bbr"
-        } > "${conf_file}"
-        sysctl -p "${conf_file}" >/dev/null 2>&1 || sysctl --system >/dev/null 2>&1
-        LOGI "Current TCP congestion control: $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)"
-        pause_key
-        ;;
-      2)
-        if [[ -f "${conf_file}" ]]; then
-          local prev_line prev_q prev_c
-          prev_line=$(head -n 1 "${conf_file}")
-          prev_q=$(echo "${prev_line}" | cut -d: -f2)
-          prev_c=$(echo "${prev_line}" | cut -d: -f3)
-          [[ -n "${prev_q}" && "${prev_q}" != "unknown" ]] && sysctl -w "net.core.default_qdisc=${prev_q}" >/dev/null 2>&1 || true
-          [[ -n "${prev_c}" && "${prev_c}" != "unknown" ]] && sysctl -w "net.ipv4.tcp_congestion_control=${prev_c}" >/dev/null 2>&1 || true
-          rm -f "${conf_file}"
-          LOGI "Restored congestion control: $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)"
-        else
-          LOGW "No BBR config file found at ${conf_file}."
-        fi
-        pause_key
-        ;;
-      0) return 0 ;;
-      *) LOGE "Invalid selection." ;;
-    esac
-  done
-}
-
-postgres_menu() {
-  while true; do
-    echo ""
-    echo -e "${CYAN}--- PostgreSQL Management ---${NC}"
-    echo "1) Check PostgreSQL service & port 5432"
-    echo "2) Start / Restart PostgreSQL"
-    echo "3) Backup fastasiapanel database"
-    echo "0) Back"
-    local opt=""
-    read -rp "Select option [0-3]: " opt </dev/tty
-    case "${opt}" in
-      1)
-        systemctl status postgresql --no-pager 2>/dev/null || true
-        if command -v ss >/dev/null 2>&1; then
-          ss -ltnp 2>/dev/null | grep ':5432' || LOGW "Port 5432 is not listening."
-        fi
-        pause_key
-        ;;
-      2)
-        systemctl restart postgresql && LOGI "PostgreSQL restarted."
-        pause_key
-        ;;
-      3)
-        if ! command -v pg_dump >/dev/null 2>&1; then
-          LOGE "pg_dump is not installed."
-          pause_key
-          continue
-        fi
-        mkdir -p /root/fastasia-backups
-        local out="/root/fastasia-backups/pg-fastasiapanel-$(date +%F-%H%M%S).sql"
-        if runuser -u postgres -- pg_dump fastasiapanel > "${out}"; then
-          LOGI "Database backup saved to ${out}"
-        else
-          rm -f "${out}"
-          LOGE "Failed to dump database fastasiapanel."
-        fi
-        pause_key
-        ;;
-      0) return 0 ;;
-      *) LOGE "Invalid selection." ;;
-    esac
-  done
-}
-
-uninstall_panel() {
-  echo ""
-  if ! confirm "Are you sure you want to completely uninstall FastAsiaPanel and remove all files/processes?" "n"; then
-    LOGW "Uninstall cancelled."
-    return 0
-  fi
-
-  LOGI "Stopping service and background processes..."
-  systemctl stop "${SERVICE_NAME}" >/dev/null 2>&1 || true
-  systemctl disable "${SERVICE_NAME}" >/dev/null 2>&1 || true
-  pkill -f "(^|/)(fastasiapanel|xray|xray-linux)" >/dev/null 2>&1 || true
-
-  rm -f "${SERVICE_FILE}"
-  systemctl daemon-reload >/dev/null 2>&1 || true
-
-  rm -rf "${APP_DIR}" "${CONF_DIR}" "${DATA_DIR}" "${SRC_DIR}"
-  rm -f "${BIN_PATH}" "${CLI_PATH}"
-
-  LOGI "FastAsiaPanel completely removed from root."
-  exit 0
-}
-
-show_usage() {
-  echo -e "${CYAN}FastAsiaPanel CLI Usage:${NC}"
-  echo "  fastasian                 Open interactive management menu"
-  echo "  fastasian start           Start fastasiapanel service"
-  echo "  fastasian stop            Stop fastasiapanel service"
-  echo "  fastasian restart         Restart fastasiapanel service"
-  echo "  fastasian restart-xray    Restart Xray core"
-  echo "  fastasian status          Show service and Xray status"
-  echo "  fastasian settings        Show panel URL, port, DB, and credentials"
-  echo "  fastasian enable          Enable autostart on boot"
-  echo "  fastasian disable         Disable autostart on boot"
-  echo "  fastasian log             Follow live service logs"
-  echo "  fastasian update          Install or update FastAsiaPanel from GitHub"
-  echo "  fastasian uninstall       Completely uninstall FastAsiaPanel"
-}
-
-show_menu() {
-  require_installed
-  while true; do
-    safe_clear
-    load_env
-    local port="${FAP_PORT:-2053}"
-    local db="${FAP_DB:-sqlite}"
-    local base="${FAP_BASE_PATH:-/}"
-    echo -e "${CYAN}┌────────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${CYAN}│${NC}  ${BOLD}FastAsiaPanel Management Menu${NC}                             ${CYAN}│${NC}"
-    echo -e "${CYAN}├────────────────────────────────────────────────────────────┤${NC}"
-    show_status_summary
-    echo -e "  Port / Path    : ${YELLOW}${port}${NC} (${YELLOW}${base}${NC})   DB: ${YELLOW}${db}${NC}"
-    echo -e "${CYAN}├────────────────────────────────────────────────────────────┤${NC}"
-    echo -e "${CYAN}│${NC}  ${GREEN}1.${NC} Start Panel            ${GREEN}9.${NC}  View Info & URL          ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}  ${GREEN}2.${NC} Stop Panel             ${GREEN}10.${NC} Reset Admin User/Pass  ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}  ${GREEN}3.${NC} Restart Panel          ${GREEN}11.${NC} Reset Web Base Path    ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}  ${GREEN}4.${NC} Restart Xray Core      ${GREEN}12.${NC} Change Panel Port      ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}  ${GREEN}5.${NC} Logs Management        ${GREEN}13.${NC} Update GeoIP/GeoSite   ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}  ${GREEN}6.${NC} Enable Autostart       ${GREEN}14.${NC} SSL Certificate Menu   ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}  ${GREEN}7.${NC} Disable Autostart      ${GREEN}15.${NC} Firewall (UFW) Menu    ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}  ${GREEN}8.${NC} Update Panel           ${GREEN}16.${NC} TCP BBR Menu           ${CYAN}│${NC}"
-    echo -e "${CYAN}├────────────────────────────────────────────────────────────┤${NC}"
-    echo -e "${CYAN}│${NC}  ${GREEN}17.${NC} PostgreSQL Menu       ${GREEN}18.${NC} Update fastasian CLI   ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}  ${RED}19.${NC} Uninstall Panel       ${YELLOW}0.${NC}  Exit                   ${CYAN}│${NC}"
-    echo -e "${CYAN}└────────────────────────────────────────────────────────────┘${NC}"
-    local choice=""
-    read -rp "Select an option [0-19]: " choice </dev/tty
-
-    case "${choice}" in
-      1) start_panel; pause_key ;;
-      2) stop_panel; pause_key ;;
-      3) restart_panel; pause_key ;;
-      4) restart_xray; pause_key ;;
-      5) show_logs_menu ;;
-      6) enable_autostart; pause_key ;;
-      7) disable_autostart; pause_key ;;
-      8) update_panel; pause_key ;;
-      9) show_settings; pause_key ;;
-      10) reset_credentials; pause_key ;;
-      11) reset_web_base_path; pause_key ;;
-      12) change_panel_port; pause_key ;;
-      13) update_geodata; pause_key ;;
-      14) ssl_menu ;;
-      15) firewall_menu ;;
-      16) bbr_menu ;;
-      17) postgres_menu ;;
-      18) update_cli_script ;;
-      19) uninstall_panel ;;
-      0) exit 0 ;;
-      *) LOGE "Invalid selection."; sleep 1 ;;
-    esac
-  done
-}
-
-if [[ $# -gt 0 ]]; then
-  case "$1" in
-    start) start_panel ;;
-    stop) stop_panel ;;
-    restart) restart_panel ;;
-    restart-xray) restart_xray ;;
-    status) show_status_summary ;;
-    settings) show_settings ;;
-    enable) enable_autostart ;;
-    disable) disable_autostart ;;
-    log) require_installed; journalctl -u "${SERVICE_NAME}" -e --no-pager -f ;;
-    update) update_panel ;;
-    uninstall) uninstall_panel ;;
-    *) show_usage ;;
-  esac
-else
-  show_menu
-fi
+main "$@"
