@@ -771,19 +771,41 @@
       '<label class="span2">Domains (comma-separated)<input class="ltr" name="domains" placeholder="geosite:openai,domain:google.com"></label>' +
       '<label class="span2">IPs / CIDRs (comma-separated)<input class="ltr" name="ips" placeholder="geoip:ir,1.1.1.1/32"></label>' +
       '<label>Destination Port (Optional)<input class="ltr" name="port" placeholder="80,443"></label>' +
-      '<label>Priority<input class="ltr" name="priority" type="number" value="50"></label>' +
+      '<label>Inbound Tags (comma-separated, optional)<input class="ltr" name="inbound_tags" placeholder="vless-in,vmess-in"></label>' +
+      '<label class="span2">Priority (lower = higher priority)<input class="ltr" name="priority" type="number" step="1" value="50"></label>' +
       '</div>';
     openModal('New Routing Rule', body, function (form, setErr) {
       var f = form.elements;
-      var domains = f.domains.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
-      var ips = f.ips.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+      var splitList = function (el) {
+        if (!el || !el.value) return [];
+        return el.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+      };
+      var remark = (f.remark.value || '').trim();
+      var outboundTag = (f.outbound_tag.value || '').trim();
+      var domains = splitList(f.domains);
+      var ips = splitList(f.ips);
+      var inboundTags = splitList(f.inbound_tags);
+      var port = (f.port.value || '').trim();
+      var rawPrio = parseInt(f.priority.value, 10);
+      var priority = isNaN(rawPrio) ? 50 : rawPrio;
+
+      if (!remark) {
+        setErr('Rule Name is required');
+        return;
+      }
+      if (!outboundTag) {
+        setErr('Target Outbound is required');
+        return;
+      }
+
       api('POST', 'routing', {
-        remark: f.remark.value.trim(),
-        outbound_tag: f.outbound_tag.value,
+        remark: remark,
+        outbound_tag: outboundTag,
         domains: domains,
         ips: ips,
-        port: f.port.value.trim(),
-        priority: parseInt(f.priority.value, 10) || 50
+        port: port,
+        inbound_tags: inboundTags,
+        priority: priority
       }).then(function () {
         closeModal();
         toast('Routing rule created');

@@ -1026,11 +1026,36 @@ func (a *App) createRouting(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	req.Remark = strings.TrimSpace(req.Remark)
 	req.OutboundTag = strings.TrimSpace(req.OutboundTag)
+	req.Port = strings.TrimSpace(req.Port)
+
 	if req.OutboundTag == "" {
 		fail(w, http.StatusBadRequest, "outbound_tag is required")
 		return
 	}
+	if req.Remark == "" {
+		req.Remark = req.OutboundTag + " rule"
+	}
+	if req.Priority == 0 {
+		req.Priority = 50
+	}
+
+	cleanSlice := func(items []string) []string {
+		out := make([]string, 0, len(items))
+		for _, item := range items {
+			v := strings.TrimSpace(item)
+			if v != "" {
+				out = append(out, v)
+			}
+		}
+		return out
+	}
+	req.Domains = cleanSlice(req.Domains)
+	req.IPs = cleanSlice(req.IPs)
+	req.InboundTags = cleanSlice(req.InboundTags)
+	req.Protocol = cleanSlice(req.Protocol)
+
 	id, err := store.NewID()
 	if err != nil {
 		fail(w, http.StatusInternalServerError, "id generation failed")
@@ -1038,6 +1063,7 @@ func (a *App) createRouting(w http.ResponseWriter, r *http.Request) {
 	}
 	req.ID = id
 	req.Enable = true
+
 	err = a.st.Update(func(s *store.State) error {
 		s.RoutingRules = append(s.RoutingRules, req)
 		return nil
