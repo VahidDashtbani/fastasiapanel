@@ -1,81 +1,101 @@
 # FastAsiaPanel
 
-پنل مدیریت Xray با پشتیبانی از VLESS، VMess، Trojan و Shadowsocks، ترنسپورت‌های TCP و WebSocket و gRPC، امنیت TLS و Reality، و محدودیت حجم و تاریخ انقضا برای هر کاربر.
+[English](#english) | [فارسی](#فارسی)
 
-## اجرا برای توسعه
+---
 
+## Quick Install / نصب سریع روی سرور
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/VahidDashtbani/fastasiapanel/main/install.sh)
 ```
+
+---
+
+<a id="english"></a>
+## English
+
+**FastAsiaPanel** is a lightweight, modern Xray management panel written in Go with a signature **Aurora Glassmorphism** web UI and an interactive CLI manager (`fastasian`).
+
+### Key Features
+- **Protocols & Transports:** VLESS, VMess, Trojan, and Shadowsocks over TCP, WebSocket, gRPC, and xHTTP with TLS and Reality (`X25519` key generation).
+- **Advanced Outbounds & Chaining:** Dedicated Outbounds manager supporting multi-hop relay chains (`relay_tag`) and custom stream settings.
+- **Routing Rules & Quota Groups:** Independent Routing Rules engine (domains, IPs, ports, protocols, priority) and shared Quota Groups.
+- **Client Management & Live Traffic:** Per-client volume limits, expiration dates, automatic periodic traffic reset, IP limits, real-time live traffic sync, Subscription URLs (`/sub/{subId}`), and scannable QR codes.
+- **Relational Databases:** Full relational schema for **SQLite** (`/etc/fastasiapanel/fastasiapanel.db`) and **PostgreSQL**.
+- **Interactive CLI (`fastasian`):** Manage panel & Xray services, port, Web Base Path, SSL certificates (`acme.sh`), UFW firewall, TCP BBR, GeoIP/GeoSite updates, and panel upgrades.
+
+### CLI Management
+```bash
+fastasian                 # Open interactive management menu
+fastasian status          # Check panel and Xray service status
+fastasian settings        # View panel URL, port, DB, and credentials
+fastasian restart         # Restart FastAsiaPanel service
+fastasian update          # Update FastAsiaPanel to the latest release
+fastasian log             # Follow live service logs
+```
+
+### Environment Variables
+| Variable | Default | Description |
+|---|---|---|
+| `FAP_LISTEN` | `0.0.0.0:2053` | Panel listen address and port |
+| `FAP_BASE_PATH` | `/` | Secret web base path (e.g., `/x7k2p9`) |
+| `FAP_ADMIN_USER` / `FAP_ADMIN_PASS` | `admin` / - | Initial administrator credentials |
+| `FAP_PUBLIC_HOST` | Request host | Public domain or IP used in client & subscription links |
+| `FAP_DB_TYPE` | `sqlite` | Database backend (`sqlite` or `postgres`) |
+| `FAP_DB_PATH` | `/etc/fastasiapanel/fastasiapanel.db` | SQLite database file path |
+| `FAP_DB_DSN` | - | PostgreSQL connection string |
+| `FAP_XRAY_BIN` | `/usr/local/fastasiapanel/bin/xray` | Path to Xray core binary |
+
+### Local Development
+```bash
 go mod tidy
 go vet ./...
 go test ./...
-PANEL_PASSWORD='یک-رمز-حداقل-۱۲-کاراکتری' XRAY_BIN=/path/to/xray go run ./cmd/panel
+go run ./cmd/panel
 ```
 
-بعد از اجرا آدرس `http://127.0.0.1:8080/` را باز کنید. نام کاربری پیش‌فرض `admin` است. رمز فقط در اولین اجرا خوانده می‌شود و بعد از آن در دیتابیس (به‌صورت هش bcrypt) نگه داشته می‌شود.
+---
 
-## متغیرهای محیطی
+<a id="فارسی"></a>
+## فارسی
 
-| متغیر | پیش‌فرض | توضیح |
+**FastAsiaPanel** یک پنل مدیریت سبک، سریع و مدرن برای هسته Xray به زبان Go است که دارای رابط کاربری شیشه‌ای (**Aurora Glassmorphism**) و ابزار مدیریت خط فرمان تعاملی (`fastasian`) می‌باشد.
+
+### امکانات کلیدی
+- **پروتکل‌ها و ترنسپورت‌ها:** پشتیبانی کامل از VLESS، VMess، Trojan و Shadowsocks روی بسترهای TCP، WebSocket، gRPC و xHTTP به همراه امنیت TLS و Reality (ساخت خودکار کلید `X25519` و `Short ID`).
+- **مدیریت مجزای Outbound و زنجیره‌سازی (Relay):** بخش مستقل برای تعریف Outboundهای سفارشی و اتصال چندلایه (`relay_tag`).
+- **قوانین مسیریابی و گروه‌های حجمی:** بخش مجزای Routing Rules (فیلتر دامنه، IP، پورت، پروتکل و اولویت) و گروه‌های اشتراک حجم (Quota Groups).
+- **مدیریت کاربران و ترافیک زنده:** محدودیت حجم و تاریخ انقضا، ریست دوره‌ای خودکار ترافیک، نمایش لحظه‌ای مصرف کاربران (Live Traffic)، لینک اشتراک (`/sub/{subId}`) و QR کد واقعی قابل اسکن در کلاینت‌ها.
+- **دیتابیس رابطه‌ای (SQLite و PostgreSQL):** پشتیبانی کامل از **SQLite** در مسیر `/etc/fastasiapanel/fastasiapanel.db` و **PostgreSQL** با ساختار جداول استاندارد.
+- **مدیریت سرور با دستور `fastasian`:** کنترل سرویس پنل و Xray، تغییر پورت و مسیر ورود (`WebBasePath`)، صدور گواهی SSL با `acme.sh`، مدیریت فایروال UFW، فعال‌سازی TCP BBR و آپدیت خودکار پنل.
+
+### دستورات مدیریت با `fastasian`
+```bash
+fastasian                 # باز کردن منوی تعاملی مدیریت پنل
+fastasian status          # مشاهده وضعیت سرویس پنل و Xray
+fastasian settings        # نمایش آدرس پنل، پورت، دیتابیس و مشخصات ورود
+fastasian restart         # ریستارت سرویس FastAsiaPanel
+fastasian update          # به‌روزرسانی پنل به آخرین نسخه منتشرشده
+fastasian log             # مشاهده زنده لاگ‌های سرویس
+```
+
+### متغیرهای محیطی مهم
+| متغیر | مقدار پیش‌فرض | توضیح |
 |---|---|---|
-| `PANEL_ADDR` | `:8080` | آدرس و پورت پنل |
-| `PANEL_PATH` | خالی | مسیر مخفی، مثل `/x7k2p9`. بدون آن، همه‌ی مسیرها زیر `/` هستند |
-| `PANEL_USERNAME` / `PANEL_PASSWORD` | `admin` / - | فقط برای ساخت ادمین اولیه |
-| `PANEL_PUBLIC_HOST` | هاست درخواست | آدرسی که در لینک کاربران می‌آید |
-| `PANEL_TLS_CERT` / `PANEL_TLS_KEY` | - | فعال‌سازی HTTPS برای خود پنل |
-| `DB_TYPE` | `json` | یکی از `json`، `sqlite` یا `postgres` |
-| `DB_FILE` | `./data/fastasiapanel.json` (یا `.db` برای sqlite) | مسیر فایل دیتابیس |
-| `DB_HOST` `DB_PORT` `DB_USER` `DB_PASS` `DB_NAME` | `127.0.0.1` `5432` `fastasia` - `fastasiapanel` | تنظیمات Postgres |
-| `XRAY_BIN` | `xray` | مسیر باینری Xray |
-| `XRAY_CONFIG` | `./data/xray.json` | مسیر کانفیگ تولیدشده |
+| `FAP_LISTEN` | `0.0.0.0:2053` | آدرس و پورت گوش‌دهنده پنل |
+| `FAP_BASE_PATH` | `/` | مسیر مخفی ورود به پنل (مثلاً `/x7k2p9`) |
+| `FAP_ADMIN_USER` / `FAP_ADMIN_PASS` | `admin` / - | نام کاربری و رمز عبور اولیه ادمین |
+| `FAP_PUBLIC_HOST` | هاست درخواست | دامنه یا IP عمومی برای ساخت لینک کلاینت‌ها و ساب |
+| `FAP_DB_TYPE` | `sqlite` | نوع دیتابیس (`sqlite` یا `postgres`) |
+| `FAP_DB_PATH` | `/etc/fastasiapanel/fastasiapanel.db` | مسیر فایل دیتابیس SQLite |
+| `FAP_DB_DSN` | - | رشته اتصال دیتابیس PostgreSQL |
+| `FAP_XRAY_BIN` | `/usr/local/fastasiapanel/bin/xray` | مسیر فایل اجرایی هسته Xray |
 
-## دستورهای باینری
-
+### اجرای محلی برای توسعه
+```bash
+go mod tidy
+go vet ./...
+go test ./...
+go run ./cmd/panel
 ```
-fastasiapanel version
-fastasiapanel reset-admin <username> <password>
-```
-
-## نصب روی سرور
-
-بعد از ساخت Release (تگ `vX.Y.Z`) روی GitHub:
-
-```
-bash install.sh
-bash install.sh --db postgres --port 2053 --db-port 5433
-```
-
-نصاب دیتابیس (SQLite یا PostgreSQL) و پورت‌ها را می‌پرسد، سرویس systemd می‌سازد و دستور `fastpanel` را نصب می‌کند. مقدار `REPO` بالای `install.sh` را به نام مخزن خودتان تغییر دهید.
-
-## ساختار پروژه
-
-```
-cmd/panel            نقطه‌ی ورود و سیم‌کشی
-internal/config      خواندن تنظیمات از env
-internal/store       State و Backend (json، sqlite، postgres)
-internal/auth        سشن، bcrypt، قفل تلاش ناموفق، بررسی Origin
-internal/xray        ساخت کانفیگ، لینک‌ها، کلید Reality، مدیریت پروسه و آمار
-internal/web         API و سرو فایل‌های UI
-web                  index.html، login.html، app.js، login.js، style.css
-```
-
-## API
-
-همه‌ی مسیرها زیر `PANEL_PATH` هستند و به جز `login` به سشن نیاز دارند.
-
-| مسیر | کار |
-|---|---|
-| `POST /api/login` · `POST /api/logout` · `POST /api/password` | احراز هویت |
-| `GET /api/status` | وضعیت پنل و Xray |
-| `GET/POST /api/inbounds` | لیست (با کاربران و لینک‌ها) و ساخت |
-| `PUT/DELETE /api/inbounds/{id}` · `POST /api/inbounds/{id}/toggle` | ویرایش، حذف، فعال/غیرفعال |
-| `POST /api/clients` · `PUT/DELETE /api/clients/{id}` | کاربران |
-| `POST /api/clients/{id}/reset` | ریست ترافیک |
-| `GET /api/reality/keys` | ساخت کلید X25519 و Short ID |
-| `POST /api/xray/restart` · `GET /api/backup` | ریستارت و بکاپ |
-
-## محدودیت‌های شناخته‌شده
-
-- با هر تغییر در اینباندها یا کاربران، Xray (با ۱.۵ ثانیه تاخیر برای ادغام تغییرات پشت‌سرهم) ریستارت می‌شود و اتصال‌های فعال یک لحظه قطع می‌شوند. افزودن زنده‌ی کاربر با gRPC در نسخه‌ی بعد.
-- آمار ترافیک با `xray api statsquery` هر ۱۰ ثانیه خوانده می‌شود.
-- هنوز ساب‌لینک، ربات تلگرام، محدودیت IP، ACME، قوانین routing سفارشی، QR و آمار CPU/RAM ندارد.
-- انتقال خودکار داده بین JSON، SQLite و Postgres هنوز دستور CLI ندارد (تابع `Store.Replace` آماده است).
