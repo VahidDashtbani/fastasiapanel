@@ -1,4 +1,4 @@
-name: Build and Release
+name: Release FastAsiaPanel
 
 on:
   push:
@@ -6,67 +6,42 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  test:
+  build-and-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-      - run: go mod tidy
-      - run: go vet ./...
-      - run: go test ./...
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-  build:
-    needs: test
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - goarch: amd64
-            goarm: ""
-            suffix: linux-amd64
-          - goarch: arm64
-            goarm: ""
-            suffix: linux-arm64
-          - goarch: arm
-            goarm: "7"
-            suffix: linux-armv7
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
-      - name: Build
-        env:
-          GOOS: linux
-          GOARCH: ${{ matrix.goarch }}
-          GOARM: ${{ matrix.goarm }}
-          CGO_ENABLED: 0
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build and package archives
         run: |
-          go mod tidy
-          go build -ldflags="-checklinkname=0 -s -w -X main.version=${GITHUB_REF_NAME#v}" -o fastasiapanel ./cmd/panel
-      - run: tar -czf fastasiapanel-${{ matrix.suffix }}.tar.gz fastasiapanel
-      - uses: actions/upload-artifact@v4
-        with:
-          name: fastasiapanel-${{ matrix.suffix }}
-          path: fastasiapanel-${{ matrix.suffix }}.tar.gz
+          mkdir -p dist
+          for ARCH in amd64 arm64; do
+            PKG_DIR="build_${ARCH}/fastasiapanel"
+            mkdir -p "${PKG_DIR}/bin"
 
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
+            CGO_ENABLED=0 GOOS=linux GOARCH="${ARCH}" go build -ldflags="-s -w" -o "${PKG_DIR}/fastasiapanel" ./cmd/panel
+
+            if [ -d "scripts" ]; then
+              cp -r scripts "${PKG_DIR}/"
+            fi
+
+            tar -czf "dist/fastasiapanel-linux-${ARCH}.tar.gz" -C "build_${ARCH}" fastasiapanel
+            (cd dist && sha256sum "fastasiapanel-linux-${ARCH}.tar.gz" > "fastasiapanel-linux-${ARCH}.tar.gz.sha256")
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          path: dist
-          merge-multiple: true
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*.tar.gz
+          files: |
+            dist/fastasiapanel-linux-*.tar.gz
+            dist/fastasiapanel-linux-*.tar.gz.sha256
           generate_release_notes: true
