@@ -13,7 +13,6 @@ BIN_PATH="/usr/local/bin/${APP_NAME}"
 CLI_PATH="/usr/local/bin/${CLI_NAME}"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 
-# رنگ‌ها
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -143,7 +142,7 @@ download_and_install_binary() {
     log_info "Got ${APP_NAME} version: ${VERSION}, beginning installation..."
     local tmp_dir
     tmp_dir="$(mktemp -d)"
-    trap 'rm -rf "${tmp_dir}"' RETURN
+    trap 'rm -rf "${tmp_dir:-}"' RETURN
 
     local asset_name="${APP_NAME}-linux-${ARCH}.tar.gz"
     local base_url="https://github.com/${REPO}/releases/download/${VERSION}"
@@ -175,7 +174,6 @@ download_and_install_binary() {
         exit 1
     fi
 
-    # بکاپ گرفتن از محتوای پوشه bin (مثل باینری xray و فایل‌های geo)
     local bin_backup=""
     if [[ -d "${APP_DIR}/bin" ]]; then
         bin_backup="${tmp_dir}/bin_backup"
@@ -194,6 +192,9 @@ download_and_install_binary() {
     if [[ -n "${bin_backup}" && -d "${bin_backup}" ]]; then
         cp -an "${bin_backup}/." "${APP_DIR}/bin/"
     fi
+
+    trap - RETURN
+    rm -rf "${tmp_dir}"
 }
 
 install_cli_script() {
@@ -315,27 +316,41 @@ apply_panel_settings() {
         SSL_KEY_PATH=""
     fi
 
+    local go_base_path=""
+    if [[ "${WEB_BASE_PATH}" != "/" ]]; then
+        go_base_path="${WEB_BASE_PATH}"
+    fi
+
+    local db_type_val="json"
+    local db_path_val="${CONFIG_DIR}/fastasiapanel.json"
+    local db_dsn_val=""
+    if [[ "${DB_TYPE:-sqlite}" == "postgres" && -n "${DB_DSN:-}" ]]; then
+        db_type_val="postgres"
+        db_dsn_val="${DB_DSN}"
+    elif [[ "${DB_TYPE:-}" == "sqlite" || "${DB_TYPE:-}" == "json" ]]; then
+        db_type_val="${DB_TYPE}"
+        db_path_val="${DB_DSN:-${CONFIG_DIR}/fastasiapanel.json}"
+    fi
+
+    local public_host_val="${SERVER_IP}"
+    if [[ -n "${SSL_DOMAIN:-}" ]]; then
+        public_host_val="${SSL_DOMAIN}"
+    fi
+
     cat > "${ENV_FILE}" <<EOF
-LISTEN=0.0.0.0:${PANEL_PORT}
-PANEL_LISTEN=0.0.0.0:${PANEL_PORT}
-PANEL_PORT=${PANEL_PORT}
-BASE_PATH=${WEB_BASE_PATH}
-PANEL_BASE_PATH=${WEB_BASE_PATH}
-PANEL_WEB_BASE_PATH=${WEB_BASE_PATH}
-ADMIN_USER=${ADMIN_USER}
-ADMIN_PASSWORD=${ADMIN_PASS}
-PANEL_ADMIN_USER=${ADMIN_USER}
-PANEL_ADMIN_PASSWORD=${ADMIN_PASS}
-DB_TYPE=${DB_TYPE}
-DB_DSN=${DB_DSN}
-DATABASE_URL=${DB_DSN}
-TLS_CERT=${SSL_CERT_PATH}
-TLS_KEY=${SSL_KEY_PATH}
-SSL_CERT_FILE=${SSL_CERT_PATH}
-SSL_KEY_FILE=${SSL_KEY_PATH}
-SECURE_COOKIES=${ssl_enabled}
-PANEL_SECURE_COOKIES=${ssl_enabled}
-XRAY_BIN=${APP_DIR}/bin/xray
+FAP_LISTEN=0.0.0.0:${PANEL_PORT}
+FAP_BASE_PATH=${go_base_path}
+FAP_DB_TYPE=${db_type_val}
+FAP_DB_PATH=${db_path_val}
+FAP_DB_DSN=${db_dsn_val}
+FAP_XRAY_BIN=${APP_DIR}/bin/xray
+FAP_XRAY_CONFIG=${CONFIG_DIR}/xray.json
+FAP_PUBLIC_HOST=${public_host_val}
+FAP_TLS_CERT=${SSL_CERT_PATH}
+FAP_TLS_KEY=${SSL_KEY_PATH}
+FAP_ADMIN_USER=${ADMIN_USER}
+FAP_ADMIN_PASSWORD=${ADMIN_PASS}
+FAP_SECURE_COOKIES=${ssl_enabled}
 EOF
     chmod 600 "${ENV_FILE}"
 
