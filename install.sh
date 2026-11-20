@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 #!/bin/bash
 
 red='\033[0;31m'
@@ -470,7 +469,6 @@ Restart=on-failure
 RestartSec=5s
 LimitNOFILE=1048576
 TimeoutStopSec=20
-=======
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -851,12 +849,10 @@ ExecStart=${BIN_PATH}
 Restart=on-failure
 RestartSec=3s
 LimitNOFILE=1048576
->>>>>>> 6cb7696 (Sync install.sh with main.go reset-admin, env config, and HTTP/HTTPS URL handling)
 
 [Install]
 WantedBy=multi-user.target
 EOF
-<<<<<<< HEAD
     chmod 644 "$unit_file"
     systemctl daemon-reload
     systemctl enable "${fap_service_name}" >/dev/null 2>&1 || true
@@ -1002,7 +998,6 @@ echo -e "${green}Running...${plain}"
 install_base
 install_fastasiapanel "${1:-}"
 config_after_install
-=======
 
     systemctl daemon-reload
     systemctl enable "${APP_NAME}" >/dev/null 2>&1
@@ -1073,4 +1068,3 @@ main() {
 }
 
 main "$@"
->>>>>>> 6cb7696 (Sync install.sh with main.go reset-admin, env config, and HTTP/HTTPS URL handling)
