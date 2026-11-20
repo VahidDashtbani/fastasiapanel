@@ -1,0 +1,8 @@
+*.db
+*.db-wal
+*.db-shm
+*.tmp
+data/
+config.json
+*.exe
+fastasiapanel

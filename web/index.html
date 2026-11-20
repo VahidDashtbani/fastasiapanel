@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+<meta name="theme-color" content="#0f172a">
+<title>FastAsiaPanel</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M10 9h12v3.5h-8v3h6.5V19H14v5h-4V9z' fill='white'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="side">
+    <div class="brand">
+      <span class="logo">F</span>
+      <div class="brand-txt">
+        <strong>FastAsiaPanel</strong>
+        <small>Xray Core Management</small>
+      </div>
+    </div>
+    <nav class="nav" id="nav">
+      <button type="button" data-page="dashboard" class="on">Dashboard</button>
+      <button type="button" data-page="inbounds">Inbounds</button>
+      <button type="button" data-page="clients">Clients</button>
+      <button type="button" data-page="routing">Routing & Outbounds</button>
+      <button type="button" data-page="quotas">Quota Groups</button>
+      <button type="button" data-page="nodes">Nodes & API</button>
+      <button type="button" data-page="logs">Logs & Xray Config</button>
+      <button type="button" data-page="settings">Settings & System</button>
+    </nav>
+    <div class="side-foot">
+      <button class="ghost" id="themeBtn" type="button">Toggle Theme</button>
+      <button class="ghost danger-ghost" id="logoutBtn" type="button">Sign Out</button>
+    </div>
+  </aside>
+  <main class="main">
+    <header class="top">
+      <h1 id="title">Dashboard</h1>
+      <div id="topActions"></div>
+    </header>
+    <div id="view" class="view"></div>
+  </main>
+</div>
+<div id="modalRoot"></div>
+<div id="toasts" aria-live="polite"></div>
+<script src="static/app.js"></script>
+</body>
+</html>

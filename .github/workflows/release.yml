@@ -1,0 +1,72 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - run: go mod tidy
+      - run: go vet ./...
+      - run: go test ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            goarm: ""
+            suffix: linux-amd64
+          - goarch: arm64
+            goarm: ""
+            suffix: linux-arm64
+          - goarch: arm
+            goarm: "7"
+            suffix: linux-armv7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Build
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: 0
+        run: |
+          go mod tidy
+          go build -ldflags="-checklinkname=0 -s -w -X main.version=${GITHUB_REF_NAME#v}" -o fastasiapanel ./cmd/panel
+      - run: tar -czf fastasiapanel-${{ matrix.suffix }}.tar.gz fastasiapanel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fastasiapanel-${{ matrix.suffix }}
+          path: fastasiapanel-${{ matrix.suffix }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tar.gz
+          generate_release_notes: true
