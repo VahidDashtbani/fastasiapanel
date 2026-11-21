@@ -1,6 +1,8 @@
 package web
 
 import (
+	"fmt"
+	"time"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -107,4 +109,35 @@ func TestPanelFlow(t *testing.T) {
 	if strings.TrimSpace(rec.Body.String()) != "[]" {
 		t.Fatalf("expected empty list, got %s", rec.Body.String())
 	}
+}
+
+
+// Auto-update check & trigger endpoints for FastAsiaPanel
+type fapReleaseInfo struct {
+	TagName string `json:"tag_name"`
+	HTMLURL string `json:"html_url"`
+	Body    string `json:"body"`
+}
+
+func fapFetchLatestRelease() (*fapReleaseInfo, error) {
+	client := &http.Client{Timeout: 8 * time.Second}
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/VahidDashtbani/fastasiapanel/releases/latest", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "FastAsiaPanel-Updater")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("github status %d", resp.StatusCode)
+	}
+	var rel fapReleaseInfo
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return nil, err
+	}
+	return &rel, nil
 }

@@ -1465,62 +1465,355 @@
     targetEl.appendChild(section);
   }
 
+var liveTrafficEnabled = true;
+var liveTrafficTimer = null;
+var prevClientStats = {}; // clientKey -> { up, down, ts, upRate, downRate }
 
-  var liveTrafficEnabled = true;
-  var liveTrafficTimer = null;
+function fmtRate(bytesPerSec) {
+  if (!bytesPerSec || bytesPerSec <= 0) return '0 B/s';
+  var units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+  var idx = 0;
+  var val = bytesPerSec;
+  while (val >= 1024 && idx < units.length - 1) {
+    val /= 1024;
+    idx++;
+  }
+  return (val >= 10 ? val.toFixed(1) : val.toFixed(2)) + ' ' + units[idx];
+}
 
-  function ensureLiveTrafficBadge() {
-    var host = document.querySelector('#clientsView, .clients-section, main, .content') || document.body;
-    if (!host || document.getElementById('fapLiveTrafficBar')) return;
-    var bar = document.createElement('div');
-    bar.id = 'fapLiveTrafficBar';
-    bar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;margin-bottom:12px;border-radius:14px;background:rgba(15,23,42,0.52);backdrop-filter:blur(14px);border:1px solid rgba(125,211,252,0.22);font-size:12.5px;';
-    bar.innerHTML =
-      '<div style="display:flex;align-items:center;gap:8px;">' +
-        '<span id="fapLiveDot" style="width:9px;height:9px;border-radius:50%;background:#10b981;box-shadow:0 0 10px #10b981;display:inline-block;"></span>' +
-        '<b>Live Client Traffic</b>' +
-        '<span id="fapLiveStamp" style="opacity:0.72;">Syncing every 3s...</span>' +
+function fmtBytesCompact(b) {
+  b = Number(b || 0);
+  if (b <= 0) return '0 B';
+  var u = ['B', 'KB', 'MB', 'GB', 'TB'];
+  var i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return (b >= 10 ? b.toFixed(1) : b.toFixed(2)) + ' ' + u[i];
+}
+
+function updateClientTrafficSnapshots(inbounds) {
+  var now = Date.now();
+  (inbounds || []).forEach(function (ib) {
+    (ib.clients || []).forEach(function (cl) {
+      var key = String(cl.id || cl.email || cl.uuid || '');
+      if (!key) return;
+      var up = Number(cl.up || cl.upload || 0);
+      var down = Number(cl.down || cl.download || 0);
+      var prev = prevClientStats[key];
+      if (prev) {
+        var dt = Math.max(0.25, (now - prev.ts) / 1000);
+        var dUp = Math.max(0, up - prev.up);
+        var dDown = Math.max(0, down - prev.down);
+        prevClientStats[key] = {
+          up: up,
+          down: down,
+          ts: now,
+          upRate: dUp / dt,
+          downRate: dDown / dt
+        };
+      } else {
+        prevClientStats[key] = {
+          up: up,
+          down: down,
+          ts: now,
+          upRate: 0,
+          downRate: 0
+        };
+      }
+    });
+  });
+}
+
+function renderLiveClientMonitor() {
+  var host = document.querySelector('#clientsView, .clients-section, main, .content') || document.body;
+  if (!host) return;
+
+  var wrap = document.getElementById('fapLiveMonitorWrap');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.id = 'fapLiveMonitorWrap';
+    wrap.className = 'card';
+    wrap.style.cssText = 'margin-bottom:16px;padding:14px 16px;';
+    host.prepend(wrap);
+  }
+
+  var inbounds = (typeof state !== 'undefined' && Array.isArray(state.inbounds)) ? state.inbounds : [];
+  var allClients = [];
+  var totalUpRate = 0;
+  var totalDownRate = 0;
+
+  inbounds.forEach(function (ib) {
+    (ib.clients || []).forEach(function (cl) {
+      var key = String(cl.id || cl.email || cl.uuid || '');
+      var st = prevClientStats[key] || { up: Number(cl.up || 0), down: Number(cl.down || 0), upRate: 0, downRate: 0 };
+      totalUpRate += st.upRate || 0;
+      totalDownRate += st.downRate || 0;
+      allClients.push({ inbound: ib, client: cl, stat: st });
+    });
+  });
+
+  var rows = allClients.map(function (item) {
+    var cl = item.client;
+    var ib = item.inbound;
+    var st = item.stat;
+
+    return '<tr>' +
+      '<td><b>' + (cl.email || cl.remark || cl.id || '-') + '</b><div style="font-size:11px;opacity:0.68">' + (ib.remark || ib.tag || '') + ' (' + String(ib.protocol || '').toUpperCase() + ')</div></td>' +
+      '<td style="color:#38bdf8;font-family:monospace;">&uarr; ' + fmtRate(st.upRate) + '</td>' +
+      '<td style="color:#a78bfa;font-family:monospace;">&darr; ' + fmtRate(st.downRate) + '</td>' +
+      '<td style="font-family:monospace;">&uarr; ' + fmtBytesCompact(st.up) + ' / &darr; ' + fmtBytesCompact(st.down) + '</td>' +
+      '<td><b>' + fmtBytesCompact(st.up + st.down) + '</b>' + (cl.total ? ' / ' + fmtBytesCompact(cl.total) : '') + '</td>' +
+    '</tr>';
+  }).join('');
+
+  wrap.innerHTML =
+    '<div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;">' +
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+        '<h3 style="margin:0;font-size:15px;">Client Traffic</h3>' +
+        '<span class="tag soft" style="color:#38bdf8">&uarr; ' + fmtRate(totalUpRate) + '</span>' +
+        '<span class="tag soft" style="color:#a78bfa">&darr; ' + fmtRate(totalDownRate) + '</span>' +
       '</div>' +
-      '<button type="button" class="btn sm" id="fapToggleLiveBtn">' + (liveTrafficEnabled ? 'Live: ON' : 'Live: OFF') + '</button>';
-    host.prepend(bar);
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<button type="button" class="btn sm" id="fapToggleLiveBtn">' + (liveTrafficEnabled ? 'Live: ON' : 'Live: OFF') + '</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="table-wrap"><table><thead><tr>' +
+      '<th>Client</th><th>Upload Speed</th><th>Download Speed</th><th>Up &amp; Down</th><th>Total Used</th>' +
+    '</tr></thead><tbody>' + (rows || '<tr><td colspan="5" style="text-align:center;opacity:0.7;">No clients available</td></tr>') + '</tbody></table></div>';
 
-    var btn = document.getElementById('fapToggleLiveBtn');
-    if (btn) {
-      btn.onclick = function () {
-        liveTrafficEnabled = !liveTrafficEnabled;
-        btn.textContent = liveTrafficEnabled ? 'Live: ON' : 'Live: OFF';
-        var dot = document.getElementById('fapLiveDot');
-        if (dot) {
-          dot.style.background = liveTrafficEnabled ? '#10b981' : '#f59e0b';
-          dot.style.boxShadow = liveTrafficEnabled ? '0 0 10px #10b981' : 'none';
-        }
-      };
+  var btn = document.getElementById('fapToggleLiveBtn');
+  if (btn) {
+    btn.onclick = function () {
+      liveTrafficEnabled = !liveTrafficEnabled;
+      renderLiveClientMonitor();
+      if (liveTrafficEnabled) {
+        refreshLiveClientsTraffic();
+      }
+    };
+  }
+}
+
+function refreshLiveClientsTraffic() {
+  if (!liveTrafficEnabled || typeof api !== 'function') return;
+  api('GET', 'inbounds').then(function (res) {
+    if (!Array.isArray(res) || typeof state === 'undefined') return;
+    state.inbounds = res;
+    updateClientTrafficSnapshots(res);
+    var onClients = !!document.querySelector('[data-page="clients"].active, #clientsView:not(.hidden)') ||
+                    /client/i.test(window.location.hash || '') ||
+                    !!document.querySelector('[data-act="toggle-client"]');
+    if (onClients) {
+      renderLiveClientMonitor();
+    }
+  }).catch(function () {});
+}
+
+// =========================================================
+// Inbound + Users JSON Export & Import
+// =========================================================
+function exportInboundsJSON(singleInboundId) {
+  var inbounds = (typeof state !== 'undefined' && Array.isArray(state.inbounds)) ? state.inbounds : [];
+  var selected = singleInboundId
+    ? inbounds.filter(function (ib) { return String(ib.id) === String(singleInboundId); })
+    : inbounds;
+
+  var payload = {
+    version: '1.1.1',
+    exported_at: new Date().toISOString(),
+    inbounds: selected.map(function (ib) {
+      var copy = JSON.parse(JSON.stringify(ib));
+      copy.clients = Array.isArray(ib.clients) ? JSON.parse(JSON.stringify(ib.clients)) : [];
+      return copy;
+    })
+  };
+
+  var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = singleInboundId
+    ? ('inbound-' + (selected[0] && (selected[0].tag || selected[0].port) || singleInboundId) + '.json')
+    : ('fastasiapanel-inbounds-' + new Date().toISOString().slice(0, 10) + '.json');
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function importInboundsFromJSONText(rawText) {
+  if (typeof api !== 'function') throw new Error('API client unavailable');
+  var parsed = JSON.parse(rawText);
+  var list = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.inbounds) ? parsed.inbounds : [parsed]);
+  if (!list.length) throw new Error('No inbound objects found in JSON');
+
+  var importedInbounds = 0;
+  var importedClients = 0;
+
+  for (var i = 0; i < list.length; i++) {
+    var item = JSON.parse(JSON.stringify(list[i]));
+    var clients = Array.isArray(item.clients) ? item.clients : [];
+    delete item.id;
+    delete item.clients;
+    delete item.up;
+    delete item.down;
+
+    var created = await api('POST', 'inbounds', item);
+    var newInboundId = created && (created.id || (created.inbound && created.inbound.id));
+    importedInbounds++;
+
+    if (newInboundId && clients.length) {
+      for (var c = 0; c < clients.length; c++) {
+        var cl = JSON.parse(JSON.stringify(clients[c]));
+        delete cl.id;
+        delete cl.up;
+        delete cl.down;
+        cl.inbound_id = newInboundId;
+        await api('POST', 'clients', cl);
+        importedClients++;
+      }
     }
   }
 
-  function refreshLiveClientsTraffic() {
-    if (!liveTrafficEnabled) return;
-    var active = document.querySelector('[data-page="clients"].active, #clientsView:not(.hidden)');
-    var onClients = !!active || /client/i.test(window.location.hash || '') || !!document.querySelector('[data-act="toggle-client"]');
-    if (!onClients) return;
-    ensureLiveTrafficBadge();
-    if (typeof api === 'function') {
-      api('GET', 'inbounds').then(function (res) {
-        if (!Array.isArray(res) || typeof state === 'undefined') return;
-        state.inbounds = res;
-        if (typeof renderClients === 'function') {
-          renderClients(true);
-        }
-        var stamp = document.getElementById('fapLiveStamp');
-        if (stamp) {
-          var now = new Date();
-          stamp.textContent = 'Updated ' + now.toLocaleTimeString();
-        }
-      }).catch(function () {});
-    }
+  if (typeof loadAll === 'function') {
+    await loadAll();
+  } else {
+    refreshLiveClientsTraffic();
   }
+  alert('Imported ' + importedInbounds + ' inbound(s) and ' + importedClients + ' user(s) successfully.');
+}
 
-  if (!liveTrafficTimer) {
-    liveTrafficTimer = setInterval(refreshLiveClientsTraffic, 3000);
-    setTimeout(refreshLiveClientsTraffic, 800);
+function injectInboundJsonToolbar() {
+  var host = document.querySelector('#inboundsView, .inbounds-section, main, .content');
+  if (!host || document.getElementById('fapInboundJsonBar')) return;
+
+  var bar = document.createElement('div');
+  bar.id = 'fapInboundJsonBar';
+  bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;margin-bottom:12px;';
+  bar.innerHTML =
+    '<button type="button" class="btn sm" id="fapExportAllInboundsBtn">Export Inbounds + Users (JSON)</button>' +
+    '<button type="button" class="btn sm" id="fapImportInboundsBtn">Import JSON</button>' +
+    '<input type="file" id="fapImportInboundsFile" accept=".json,application/json" style="display:none" />';
+  host.prepend(bar);
+
+  document.getElementById('fapExportAllInboundsBtn').onclick = function () {
+    exportInboundsJSON(null);
+  };
+
+  var fileInput = document.getElementById('fapImportInboundsFile');
+  document.getElementById('fapImportInboundsBtn').onclick = function () {
+    fileInput.value = '';
+    fileInput.click();
+  };
+
+  fileInput.onchange = function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      importInboundsFromJSONText(String(reader.result || '')).catch(function (err) {
+        alert('Import failed: ' + (err && err.message ? err.message : err));
+      });
+    };
+    reader.readAsText(f);
+  };
+}
+
+if (!liveTrafficTimer) {
+  liveTrafficTimer = setInterval(function () {
+    injectInboundJsonToolbar();
+    refreshLiveClientsTraffic();
+  }, 1000);
+  setTimeout(function () {
+    injectInboundJsonToolbar();
+    refreshLiveClientsTraffic();
+  }, 200);
+}
+
+
+// =========================================================
+// Self-Update Notification & One-Click Update Trigger
+// =========================================================
+var fapCurrentVersion = '1.1.1';
+
+function fapNormalizeVer(v) {
+  return String(v || '').trim().replace(/^v/i, '');
+}
+
+function fapIsNewerVersion(latest, current) {
+  var a = fapNormalizeVer(latest).split('.').map(function (n) { return parseInt(n, 10) || 0; });
+  var b = fapNormalizeVer(current).split('.').map(function (n) { return parseInt(n, 10) || 0; });
+  var len = Math.max(a.length, b.length);
+  for (var i = 0; i < len; i++) {
+    var x = a[i] || 0;
+    var y = b[i] || 0;
+    if (x > y) return true;
+    if (x < y) return false;
   }
+  return false;
+}
+
+function fapShowUpdateBanner(latestTag, releaseUrl) {
+  if (document.getElementById('fapUpdateBanner')) return;
+  var banner = document.createElement('div');
+  banner.id = 'fapUpdateBanner';
+  banner.style.cssText =
+    'position:fixed;bottom:18px;right:18px;z-index:9999;max-width:420px;padding:14px 16px;' +
+    'border-radius:16px;background:rgba(15,23,42,0.84);backdrop-filter:blur(20px) saturate(165%);' +
+    'border:1px solid rgba(56,189,248,0.45);box-shadow:0 18px 45px rgba(2,8,23,0.65);color:#f8fafc;';
+  banner.innerHTML =
+    '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
+      '<div>' +
+        '<div style="font-weight:700;font-size:14px;color:#7dd3fc;">New Panel Update Available (' + latestTag + ')</div>' +
+        '<div style="font-size:12px;opacity:0.8;margin-top:3px;">Current: v' + fapNormalizeVer(fapCurrentVersion) + ' &rarr; Latest: ' + latestTag + '</div>' +
+      '</div>' +
+      '<button type="button" id="fapDismissUpdateBtn" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:16px;line-height:1;">&times;</button>' +
+    '</div>' +
+    '<div id="fapUpdateStatusMsg" style="font-size:12px;color:#34d399;margin-top:8px;display:none;"></div>' +
+    '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;">' +
+      (releaseUrl ? '<a class="btn sm" href="' + releaseUrl + '" target="_blank" rel="noopener">Release Notes</a>' : '') +
+      '<button type="button" class="btn sm primary" id="fapTriggerUpdateBtn">Update Now</button>' +
+    '</div>';
+  document.body.appendChild(banner);
+
+  document.getElementById('fapDismissUpdateBtn').onclick = function () {
+    banner.remove();
+  };
+
+  document.getElementById('fapTriggerUpdateBtn').onclick = function () {
+    var btn = document.getElementById('fapTriggerUpdateBtn');
+    var msg = document.getElementById('fapUpdateStatusMsg');
+    if (btn) btn.disabled = true;
+    if (msg) {
+      msg.style.display = 'block';
+      msg.textContent = 'Starting update to ' + latestTag + '... Service will restart shortly.';
+    }
+    var runUpdate = function () {
+      if (typeof api === 'function') {
+        api('POST', 'update/run', { version: latestTag }).catch(function () {});
+      }
+      setTimeout(function () {
+        if (msg) msg.textContent = 'Update applied. Reloading panel...';
+        window.location.reload();
+      }, 6000);
+    };
+    runUpdate();
+  };
+}
+
+function fapCheckForPanelUpdate() {
+  if (typeof api === 'function') {
+    api('GET', 'status').then(function (st) {
+      if (st && st.version) fapCurrentVersion = st.version;
+    }).catch(function () {});
+  }
+  fetch('https://api.github.com/repos/VahidDashtbani/fastasiapanel/releases/latest')
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (data) {
+      if (data && data.tag_name && fapIsNewerVersion(data.tag_name, fapCurrentVersion)) {
+        fapShowUpdateBanner(data.tag_name, data.html_url || '');
+      }
+    })
+    .catch(function () {});
+}
+
+setTimeout(fapCheckForPanelUpdate, 1500);
+setInterval(fapCheckForPanelUpdate, 1800000);
