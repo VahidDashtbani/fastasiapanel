@@ -222,10 +222,6 @@ func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
 	b := a.cfg.BasePath
 	req := a.au.Require
-	mux.HandleFunc("/api/v1/inbounds", fapHandleAPIV1Inbounds)
-	mux.HandleFunc("/api/v1/inbounds/", fapHandleAPIV1Inbounds)
-	mux.HandleFunc("/api/v1/clients", fapHandleAPIV1Clients)
-	mux.HandleFunc("/api/v1/clients/", fapHandleAPIV1Clients)
 
 
 	mux.HandleFunc("GET "+b+"/{$}", a.index)
