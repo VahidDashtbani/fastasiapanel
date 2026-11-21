@@ -51,7 +51,7 @@ func main() {
 		return
 	}
 
-	if !au.HasAdmin() {
+	if !au.HasAdmin() || os.Getenv("FAP_ADMIN_USER") != "" || os.Getenv("FAP_ADMIN_PASSWORD") != "" {
 		if err := cfg.ValidateBootstrap(); err != nil {
 			log.Fatal(err)
 		}

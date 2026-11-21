@@ -275,7 +275,7 @@ show_settings() {
   [[ -z "${base}" ]] && base="/"
   local db="${FAP_DB_TYPE:-${FAP_DB:-sqlite}}"
   local user="${FAP_ADMIN_USER:-admin}"
-  local pass="${FAP_ADMIN_PASS:-********}"
+  local pass="${FAP_ADMIN_PASSWORD:-${FAP_ADMIN_PASS:-********}}"
 
   echo ""
   echo -e "${CYAN}========================================================${NC}"
@@ -310,7 +310,8 @@ reset_credentials() {
   [[ -z "${new_pass}" ]] && new_pass="$(gen_rand_str 14)"
 
   save_env_key "FAP_ADMIN_USER" "${new_user}"
-  save_env_key "FAP_ADMIN_PASS" "${new_pass}"
+  save_env_key "FAP_ADMIN_PASSWORD" "${new_pass}"
+  /usr/local/bin/fastasiapanel set-admin "${new_user}" "${new_pass}" >/dev/null 2>&1 || true
   load_env
 
   (cd "${DATA_DIR}" && "${BIN_PATH}" reset-admin "${new_user}" "${new_pass}") >/dev/null 2>&1 || true
