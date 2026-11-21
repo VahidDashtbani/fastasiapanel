@@ -1607,6 +1607,22 @@ function refreshLiveClientsTraffic() {
   }).catch(function () {});
 }
 
+function fapFindInboundsSearchRow() {
+  var inputs = Array.from(document.querySelectorAll('input[type="search"], input[type="text"], input:not([type])'));
+  for (var i = 0; i < inputs.length; i++) {
+    var inp = inputs[i];
+    if (inp.closest('#fapInboundJsonModal, #sidebar, nav, .sidebar, .nav')) continue;
+    var rect = inp.getBoundingClientRect ? inp.getBoundingClientRect() : { width: 0, height: 0 };
+    if (rect.width === 0 && rect.height === 0) continue;
+    var hint = ((inp.placeholder || '') + ' ' + (inp.id || '') + ' ' + (inp.className || '') + ' ' + (inp.getAttribute('aria-label') || '')).toLowerCase();
+    var inInboundSection = Boolean(inp.closest('#inboundsSection, #inbounds-view, #view-inbounds, [data-view="inbounds"]'));
+    if (inInboundSection || /search|filter|inbound|جستجو|فیلتر/.test(hint)) {
+      return inp;
+    }
+  }
+  return null;
+}
+
 function fapFindInboundsHeaderTarget() {
   var candidates = Array.from(document.querySelectorAll('h1, h2, h3, .section-title, .page-title, .card-header, header'));
   for (var i = 0; i < candidates.length; i++) {
@@ -1625,6 +1641,25 @@ function fapFindInboundsHeaderTarget() {
   );
 }
 
+function fapInjectInboundBarStyles() {
+  if (document.getElementById('fapInboundBarResponsiveStyle')) return;
+  var st = document.createElement('style');
+  st.id = 'fapInboundBarResponsiveStyle';
+  st.textContent =
+    '#fapInboundPageJsonBar{display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;flex-shrink:0;}' +
+    '#fapInboundPageJsonBar .fap-ib-json-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;' +
+      'height:36px;padding:0 12px;border-radius:10px;font-size:12.5px;font-weight:600;white-space:nowrap;cursor:pointer;' +
+      'background:rgba(15,23,42,0.62);color:#e2e8f0;border:1px solid rgba(125,211,252,0.28);' +
+      'backdrop-filter:blur(10px);transition:all .18s ease;}' +
+    '#fapInboundPageJsonBar .fap-ib-json-btn:hover{border-color:rgba(125,211,252,0.65);background:rgba(30,41,59,0.85);color:#fff;}' +
+    '#fapInboundPageJsonBar .fap-ib-json-btn.primary{background:linear-gradient(135deg,rgba(14,165,233,0.28),rgba(56,189,248,0.18));border-color:rgba(56,189,248,0.45);}' +
+    '@media (max-width:640px){' +
+      '#fapInboundPageJsonBar{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;}' +
+      '#fapInboundPageJsonBar .fap-ib-json-btn{width:100%;height:38px;padding:0 10px;font-size:12px;}' +
+    '}';
+  document.head.appendChild(st);
+}
+
 function fapOpenInboundJsonModal(mode, initialJson) {
   var old = document.getElementById('fapInboundJsonModal');
   if (old) old.remove();
@@ -1633,12 +1668,12 @@ function fapOpenInboundJsonModal(mode, initialJson) {
   var wrap = document.createElement('div');
   wrap.id = 'fapInboundJsonModal';
   wrap.style.cssText =
-    'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;' +
-    'background:rgba(2,8,23,0.72);backdrop-filter:blur(10px);';
+    'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:14px;' +
+    'background:rgba(2,8,23,0.74);backdrop-filter:blur(10px);';
 
   wrap.innerHTML =
     '<div style="width:100%;max-width:720px;border-radius:18px;padding:18px;' +
-      'background:rgba(15,23,42,0.92);border:1px solid rgba(125,211,252,0.35);' +
+      'background:rgba(15,23,42,0.94);border:1px solid rgba(125,211,252,0.35);' +
       'box-shadow:0 24px 60px rgba(0,0,0,0.65);color:#f8fafc;">' +
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">' +
         '<div>' +
@@ -1651,9 +1686,9 @@ function fapOpenInboundJsonModal(mode, initialJson) {
         '</div>' +
         '<button type="button" id="fapCloseInboundJsonModal" style="background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;">&times;</button>' +
       '</div>' +
-      '<textarea id="fapInboundJsonTextarea" spellcheck="false" style="width:100%;min-height:300px;resize:vertical;padding:12px;border-radius:12px;' +
+      '<textarea id="fapInboundJsonTextarea" spellcheck="false" style="width:100%;min-height:280px;resize:vertical;padding:12px;border-radius:12px;' +
         'font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12.5px;line-height:1.5;' +
-        'background:rgba(2,8,23,0.75);color:#e2e8f0;border:1px solid rgba(255,255,255,0.16);box-sizing:border-box;"></textarea>' +
+        'background:rgba(2,8,23,0.78);color:#e2e8f0;border:1px solid rgba(255,255,255,0.16);box-sizing:border-box;"></textarea>' +
       '<div id="fapInboundJsonStatus" style="font-size:12px;margin-top:8px;min-height:18px;"></div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:12px;">' +
         (!isImport
@@ -1794,21 +1829,38 @@ async function fapImportInboundsJSON(raw) {
 }
 
 function fapPlaceInboundJsonButtons() {
-  if (document.getElementById('fapInboundPageJsonBar')) return;
-  var target = fapFindInboundsHeaderTarget();
-  if (!target) return;
+  fapInjectInboundBarStyles();
+  var existing = document.getElementById('fapInboundPageJsonBar');
+  var searchInp = fapFindInboundsSearchRow();
+
+  if (existing && searchInp && existing.parentElement && existing.parentElement.contains(searchInp)) {
+    return;
+  }
+  if (existing) existing.remove();
 
   var bar = document.createElement('div');
   bar.id = 'fapInboundPageJsonBar';
-  bar.style.cssText = 'display:inline-flex;gap:8px;align-items:center;margin-inline-start:12px;vertical-align:middle;';
   bar.innerHTML =
-    '<button type="button" class="btn sm" id="fapInboundPageExportBtn">Export JSON</button>' +
-    '<button type="button" class="btn sm" id="fapInboundPageImportBtn">Import JSON</button>';
+    '<button type="button" class="fap-ib-json-btn" id="fapInboundPageExportBtn">Export JSON</button>' +
+    '<button type="button" class="fap-ib-json-btn primary" id="fapInboundPageImportBtn">Import JSON</button>';
 
-  if (target.tagName && /^H[1-6]$/.test(target.tagName) && target.parentElement) {
-    target.parentElement.insertBefore(bar, target.nextSibling);
+  if (searchInp && searchInp.parentElement) {
+    var row = searchInp.parentElement;
+    row.style.display = 'flex';
+    row.style.flexWrap = 'wrap';
+    row.style.alignItems = 'center';
+    row.style.gap = '8px';
+    searchInp.style.flex = '1 1 200px';
+    searchInp.style.minWidth = '160px';
+    searchInp.insertAdjacentElement('afterend', bar);
   } else {
-    target.prepend(bar);
+    var target = fapFindInboundsHeaderTarget();
+    if (!target) return;
+    if (target.tagName && /^H[1-6]$/.test(target.tagName) && target.parentElement) {
+      target.parentElement.insertBefore(bar, target.nextSibling);
+    } else {
+      target.prepend(bar);
+    }
   }
 
   document.getElementById('fapInboundPageExportBtn').onclick = function () {
@@ -1819,5 +1871,5 @@ function fapPlaceInboundJsonButtons() {
   };
 }
 
-setInterval(fapPlaceInboundJsonButtons, 1200);
-setTimeout(fapPlaceInboundJsonButtons, 300);
+setInterval(fapPlaceInboundJsonButtons, 900);
+setTimeout(fapPlaceInboundJsonButtons, 200);
