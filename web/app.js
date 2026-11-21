@@ -1608,212 +1608,217 @@ function refreshLiveClientsTraffic() {
 }
 
 // =========================================================
-// Inbound + Users JSON Export & Import
+// Inbound + Users JSON Export & Import (Inside Inbounds Section)
 // =========================================================
-function exportInboundsJSON(singleInboundId) {
+function fapFindInboundsContainer() {
+  return (
+    document.querySelector('#inboundsSection, #inbounds-view, #view-inbounds, [data-view="inbounds"], [data-page="inbounds"]') ||
+    Array.from(document.querySelectorAll('section, .card, .panel, main, .content')).find(function (el) {
+      var txt = (el.textContent || '');
+      return /inbound/i.test(txt) && (/add inbound/i.test(txt) || /new inbound/i.test(txt) || /port/i.test(txt));
+    }) ||
+    document.querySelector('main, .content') ||
+    document.body
+  );
+}
+
+function fapOpenJsonNoteModal(mode, initialJson) {
+  var existing = document.getElementById('fapInboundJsonModal');
+  if (existing) existing.remove();
+
+  var isImport = mode === 'import';
+  var modal = document.createElement('div');
+  modal.id = 'fapInboundJsonModal';
+  modal.style.cssText =
+    'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;' +
+    'background:rgba(2,8,23,0.72);backdrop-filter:blur(10px);';
+
+  modal.innerHTML =
+    '<div style="width:100%;max-width:720px;border-radius:18px;padding:18px;' +
+      'background:rgba(15,23,42,0.9);border:1px solid rgba(125,211,252,0.35);' +
+      'box-shadow:0 24px 60px rgba(0,0,0,0.65);color:#f8fafc;">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;">' +
+        '<div>' +
+          '<h3 style="margin:0;font-size:16px;">' + (isImport ? 'Import Inbound & Users JSON' : 'Export Inbound & Users JSON') + '</h3>' +
+          '<div style="font-size:12px;opacity:0.75;margin-top:2px;">' +
+            (isImport
+              ? 'Paste your Inbound JSON (including clients) below and click Create Inbound.'
+              : 'Copy or download the JSON of your inbound(s) and clients.') +
+          '</div>' +
+        '</div>' +
+        '<button type="button" id="fapCloseJsonModalBtn" style="background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;">&times;</button>' +
+      '</div>' +
+      '<textarea id="fapJsonNoteTextarea" spellcheck="false" style="width:100%;min-height:300px;resize:vertical;padding:12px;border-radius:12px;' +
+        'font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12.5px;line-height:1.5;' +
+        'background:rgba(2,8,23,0.75);color:#e2e8f0;border:1px solid rgba(255,255,255,0.16);box-sizing:border-box;"></textarea>' +
+      '<div id="fapJsonModalFeedback" style="font-size:12px;margin-top:8px;min-height:18px;"></div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:12px;">' +
+        (!isImport
+          ? '<button type="button" class="btn sm" id="fapCopyJsonNoteBtn">Copy JSON</button>' +
+            '<button type="button" class="btn sm primary" id="fapDownloadJsonNoteBtn">Download .json</button>'
+          : '<button type="button" class="btn sm primary" id="fapSubmitImportJsonBtn">Import & Create</button>') +
+        '<button type="button" class="btn sm" id="fapCancelJsonModalBtn">Close</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(modal);
+
+  var ta = document.getElementById('fapJsonNoteTextarea');
+  if (ta) ta.placeholder = JSON.stringify({ remark: "my-inbound", protocol: "vless", port: 443, clients: [{ email: "user1" }] }, null, 2);
+  var fb = document.getElementById('fapJsonModalFeedback');
+  if (!isImport && initialJson) {
+    ta.value = initialJson;
+  }
+
+  function closeModal() {
+    modal.remove();
+  }
+
+  document.getElementById('fapCloseJsonModalBtn').onclick = closeModal;
+  document.getElementById('fapCancelJsonModalBtn').onclick = closeModal;
+  modal.addEventListener('click', function (e) {
+    if (e.target === modal) closeModal();
+  });
+
+  if (!isImport) {
+    var copyBtn = document.getElementById('fapCopyJsonNoteBtn');
+    if (copyBtn) {
+      copyBtn.onclick = function () {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(ta.value).then(function () {
+            fb.style.color = '#34d399';
+            fb.textContent = 'JSON copied to clipboard.';
+          }).catch(function () {
+            ta.select();
+            document.execCommand('copy');
+            fb.style.color = '#34d399';
+            fb.textContent = 'JSON copied.';
+          });
+        }
+      };
+    }
+    var dlBtn = document.getElementById('fapDownloadJsonNoteBtn');
+    if (dlBtn) {
+      dlBtn.onclick = function () {
+        var blob = new Blob([ta.value], { type: 'application/json' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'fastasiapanel-inbound-export.json';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      };
+    }
+  } else {
+    var impBtn = document.getElementById('fapSubmitImportJsonBtn');
+    if (impBtn) {
+      impBtn.onclick = function () {
+        var raw = (ta.value || '').trim();
+        if (!raw) {
+          fb.style.color = '#f87171';
+          fb.textContent = 'Please paste Inbound JSON first.';
+          return;
+        }
+        impBtn.disabled = true;
+        fb.style.color = '#7dd3fc';
+        fb.textContent = 'Importing inbound & clients...';
+
+        fapImportInboundsFromJSONText(raw).then(function (summary) {
+          fb.style.color = '#34d399';
+          fb.textContent = summary;
+          setTimeout(closeModal, 700);
+        }).catch(function (err) {
+          impBtn.disabled = false;
+          fb.style.color = '#f87171';
+          fb.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        });
+      };
+    }
+  }
+}
+
+function fapBuildInboundExportJSON(singleInboundId) {
   var inbounds = (typeof state !== 'undefined' && Array.isArray(state.inbounds)) ? state.inbounds : [];
   var selected = singleInboundId
     ? inbounds.filter(function (ib) { return String(ib.id) === String(singleInboundId); })
     : inbounds;
 
-  var payload = {
+  var data = selected.length === 1 && singleInboundId ? selected[0] : {
     version: '1.1.1',
     exported_at: new Date().toISOString(),
-    inbounds: selected.map(function (ib) {
-      var copy = JSON.parse(JSON.stringify(ib));
-      copy.clients = Array.isArray(ib.clients) ? JSON.parse(JSON.stringify(ib.clients)) : [];
-      return copy;
-    })
+    inbounds: selected
   };
 
-  var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement('a');
-  a.href = url;
-  a.download = singleInboundId
-    ? ('inbound-' + (selected[0] && (selected[0].tag || selected[0].port) || singleInboundId) + '.json')
-    : ('fastasiapanel-inbounds-' + new Date().toISOString().slice(0, 10) + '.json');
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  return JSON.stringify(data, null, 2);
 }
 
-async function importInboundsFromJSONText(rawText) {
-  if (typeof api !== 'function') throw new Error('API client unavailable');
+async function fapImportInboundsFromJSONText(rawText) {
+  if (typeof api !== 'function') throw new Error('API helper not available');
   var parsed = JSON.parse(rawText);
-  var list = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.inbounds) ? parsed.inbounds : [parsed]);
-  if (!list.length) throw new Error('No inbound objects found in JSON');
+  var list = Array.isArray(parsed)
+    ? parsed
+    : (Array.isArray(parsed.inbounds) ? parsed.inbounds : [parsed]);
 
-  var importedInbounds = 0;
-  var importedClients = 0;
+  if (!list.length) throw new Error('JSON does not contain any inbound object');
+
+  var createdInbounds = 0;
+  var createdClients = 0;
 
   for (var i = 0; i < list.length; i++) {
-    var item = JSON.parse(JSON.stringify(list[i]));
-    var clients = Array.isArray(item.clients) ? item.clients : [];
+    var item = JSON.parse(JSON.stringify(list[i] || {}));
+    var clients = Array.isArray(item.clients) ? item.clients : (Array.isArray(item.users) ? item.users : []);
     delete item.id;
     delete item.clients;
+    delete item.users;
     delete item.up;
     delete item.down;
 
     var created = await api('POST', 'inbounds', item);
     var newInboundId = created && (created.id || (created.inbound && created.inbound.id));
-    importedInbounds++;
+    createdInbounds++;
 
     if (newInboundId && clients.length) {
       for (var c = 0; c < clients.length; c++) {
-        var cl = JSON.parse(JSON.stringify(clients[c]));
+        var cl = JSON.parse(JSON.stringify(clients[c] || {}));
         delete cl.id;
         delete cl.up;
         delete cl.down;
         cl.inbound_id = newInboundId;
         await api('POST', 'clients', cl);
-        importedClients++;
+        createdClients++;
       }
     }
   }
 
   if (typeof loadAll === 'function') {
     await loadAll();
-  } else {
-    refreshLiveClientsTraffic();
   }
-  alert('Imported ' + importedInbounds + ' inbound(s) and ' + importedClients + ' user(s) successfully.');
+  return 'Created ' + createdInbounds + ' inbound(s) and ' + createdClients + ' client(s).';
 }
 
-function injectInboundJsonToolbar() {
-  var host = document.querySelector('#inboundsView, .inbounds-section, main, .content');
-  if (!host || document.getElementById('fapInboundJsonBar')) return;
+function fapMountInboundsJsonControls() {
+  var container = fapFindInboundsContainer();
+  if (!container) return;
 
-  var bar = document.createElement('div');
-  bar.id = 'fapInboundJsonBar';
-  bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;margin-bottom:12px;';
-  bar.innerHTML =
-    '<button type="button" class="btn sm" id="fapExportAllInboundsBtn">Export Inbounds + Users (JSON)</button>' +
-    '<button type="button" class="btn sm" id="fapImportInboundsBtn">Import JSON</button>' +
-    '<input type="file" id="fapImportInboundsFile" accept=".json,application/json" style="display:none" />';
-  host.prepend(bar);
+  if (!document.getElementById('fapInboundsJsonControls')) {
+    var box = document.createElement('div');
+    box.id = 'fapInboundsJsonControls';
+    box.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0 14px;';
+    box.innerHTML =
+      '<button type="button" class="btn sm" id="fapOpenExportJsonBtn">Export JSON</button>' +
+      '<button type="button" class="btn sm" id="fapOpenImportJsonBtn">Import JSON (Paste)</button>';
+    container.prepend(box);
 
-  document.getElementById('fapExportAllInboundsBtn').onclick = function () {
-    exportInboundsJSON(null);
-  };
-
-  var fileInput = document.getElementById('fapImportInboundsFile');
-  document.getElementById('fapImportInboundsBtn').onclick = function () {
-    fileInput.value = '';
-    fileInput.click();
-  };
-
-  fileInput.onchange = function (e) {
-    var f = e.target.files && e.target.files[0];
-    if (!f) return;
-    var reader = new FileReader();
-    reader.onload = function () {
-      importInboundsFromJSONText(String(reader.result || '')).catch(function (err) {
-        alert('Import failed: ' + (err && err.message ? err.message : err));
-      });
+    document.getElementById('fapOpenExportJsonBtn').onclick = function () {
+      fapOpenJsonNoteModal('export', fapBuildInboundExportJSON(null));
     };
-    reader.readAsText(f);
-  };
-}
-
-if (!liveTrafficTimer) {
-  liveTrafficTimer = setInterval(function () {
-    injectInboundJsonToolbar();
-    refreshLiveClientsTraffic();
-  }, 1000);
-  setTimeout(function () {
-    injectInboundJsonToolbar();
-    refreshLiveClientsTraffic();
-  }, 200);
-}
-
-
-// =========================================================
-// Self-Update Notification & One-Click Update Trigger
-// =========================================================
-var fapCurrentVersion = '1.1.1';
-
-function fapNormalizeVer(v) {
-  return String(v || '').trim().replace(/^v/i, '');
-}
-
-function fapIsNewerVersion(latest, current) {
-  var a = fapNormalizeVer(latest).split('.').map(function (n) { return parseInt(n, 10) || 0; });
-  var b = fapNormalizeVer(current).split('.').map(function (n) { return parseInt(n, 10) || 0; });
-  var len = Math.max(a.length, b.length);
-  for (var i = 0; i < len; i++) {
-    var x = a[i] || 0;
-    var y = b[i] || 0;
-    if (x > y) return true;
-    if (x < y) return false;
-  }
-  return false;
-}
-
-function fapShowUpdateBanner(latestTag, releaseUrl) {
-  if (document.getElementById('fapUpdateBanner')) return;
-  var banner = document.createElement('div');
-  banner.id = 'fapUpdateBanner';
-  banner.style.cssText =
-    'position:fixed;bottom:18px;right:18px;z-index:9999;max-width:420px;padding:14px 16px;' +
-    'border-radius:16px;background:rgba(15,23,42,0.84);backdrop-filter:blur(20px) saturate(165%);' +
-    'border:1px solid rgba(56,189,248,0.45);box-shadow:0 18px 45px rgba(2,8,23,0.65);color:#f8fafc;';
-  banner.innerHTML =
-    '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
-      '<div>' +
-        '<div style="font-weight:700;font-size:14px;color:#7dd3fc;">New Panel Update Available (' + latestTag + ')</div>' +
-        '<div style="font-size:12px;opacity:0.8;margin-top:3px;">Current: v' + fapNormalizeVer(fapCurrentVersion) + ' &rarr; Latest: ' + latestTag + '</div>' +
-      '</div>' +
-      '<button type="button" id="fapDismissUpdateBtn" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:16px;line-height:1;">&times;</button>' +
-    '</div>' +
-    '<div id="fapUpdateStatusMsg" style="font-size:12px;color:#34d399;margin-top:8px;display:none;"></div>' +
-    '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;">' +
-      (releaseUrl ? '<a class="btn sm" href="' + releaseUrl + '" target="_blank" rel="noopener">Release Notes</a>' : '') +
-      '<button type="button" class="btn sm primary" id="fapTriggerUpdateBtn">Update Now</button>' +
-    '</div>';
-  document.body.appendChild(banner);
-
-  document.getElementById('fapDismissUpdateBtn').onclick = function () {
-    banner.remove();
-  };
-
-  document.getElementById('fapTriggerUpdateBtn').onclick = function () {
-    var btn = document.getElementById('fapTriggerUpdateBtn');
-    var msg = document.getElementById('fapUpdateStatusMsg');
-    if (btn) btn.disabled = true;
-    if (msg) {
-      msg.style.display = 'block';
-      msg.textContent = 'Starting update to ' + latestTag + '... Service will restart shortly.';
-    }
-    var runUpdate = function () {
-      if (typeof api === 'function') {
-        api('POST', 'update/run', { version: latestTag }).catch(function () {});
-      }
-      setTimeout(function () {
-        if (msg) msg.textContent = 'Update applied. Reloading panel...';
-        window.location.reload();
-      }, 6000);
+    document.getElementById('fapOpenImportJsonBtn').onclick = function () {
+      fapOpenJsonNoteModal('import', '');
     };
-    runUpdate();
-  };
-}
-
-function fapCheckForPanelUpdate() {
-  if (typeof api === 'function') {
-    api('GET', 'status').then(function (st) {
-      if (st && st.version) fapCurrentVersion = st.version;
-    }).catch(function () {});
   }
-  fetch('https://api.github.com/repos/VahidDashtbani/fastasiapanel/releases/latest')
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (data) {
-      if (data && data.tag_name && fapIsNewerVersion(data.tag_name, fapCurrentVersion)) {
-        fapShowUpdateBanner(data.tag_name, data.html_url || '');
-      }
-    })
-    .catch(function () {});
 }
 
-setTimeout(fapCheckForPanelUpdate, 1500);
-setInterval(fapCheckForPanelUpdate, 1800000);
+setInterval(fapMountInboundsJsonControls, 1500);
+setTimeout(fapMountInboundsJsonControls, 400);
