@@ -51,7 +51,7 @@ func readCPUTimes() (idle, total uint64, ok bool) {
 			for i := 1; i < len(fields); i++ {
 				v, _ := strconv.ParseUint(fields[i], 10, 64)
 				total += v
-				if i == 4 || i == 5 { // idle + iowait
+				if i == 4 || i == 5 { 
 					idle += v
 				}
 			}
@@ -74,7 +74,7 @@ func readMemInfo() (used, total uint64) {
 			continue
 		}
 		v, _ := strconv.ParseUint(fields[1], 10, 64)
-		v *= 1024 // kB to bytes
+		v *= 1024 
 		switch fields[0] {
 		case "MemTotal:":
 			memTotal = v

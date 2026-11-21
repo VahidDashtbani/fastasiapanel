@@ -179,7 +179,7 @@ func OpenSQL(driver, dsn string) (*Store, error) {
 		}
 	}
 	for _, m := range migrations {
-		_, _ = db.Exec(m) // Ignore duplicate column errors on existing schemas
+		_, _ = db.Exec(m) 
 	}
 	s, err := New(b)
 	if err != nil {

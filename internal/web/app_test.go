@@ -112,7 +112,7 @@ func TestPanelFlow(t *testing.T) {
 }
 
 
-// Auto-update check & trigger endpoints for FastAsiaPanel
+
 type fapReleaseInfo struct {
 	TagName string `json:"tag_name"`
 	HTMLURL string `json:"html_url"`

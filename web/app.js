@@ -1607,104 +1607,107 @@ function refreshLiveClientsTraffic() {
   }).catch(function () {});
 }
 
-// =========================================================
-// Inbound + Users JSON Export & Import (Inside Inbounds Section)
-// =========================================================
-function fapFindInboundsContainer() {
+function fapFindInboundsHeaderTarget() {
+  var candidates = Array.from(document.querySelectorAll('h1, h2, h3, .section-title, .page-title, .card-header, header'));
+  for (var i = 0; i < candidates.length; i++) {
+    var el = candidates[i];
+    var rect = el.getBoundingClientRect ? el.getBoundingClientRect() : { width: 1, height: 1 };
+    if (rect.width === 0 && rect.height === 0) continue;
+    var txt = (el.textContent || '').trim();
+    if (/^inbounds?$/i.test(txt) || /\binbounds\b/i.test(txt)) {
+      if (el.closest('#sidebar, nav, .sidebar, .nav')) continue;
+      return el;
+    }
+  }
   return (
-    document.querySelector('#inboundsSection, #inbounds-view, #view-inbounds, [data-view="inbounds"], [data-page="inbounds"]') ||
-    Array.from(document.querySelectorAll('section, .card, .panel, main, .content')).find(function (el) {
-      var txt = (el.textContent || '');
-      return /inbound/i.test(txt) && (/add inbound/i.test(txt) || /new inbound/i.test(txt) || /port/i.test(txt));
-    }) ||
-    document.querySelector('main, .content') ||
-    document.body
+    document.querySelector('#inboundsSection, #inbounds-view, #view-inbounds, [data-view="inbounds"]') ||
+    document.querySelector('main')
   );
 }
 
-function fapOpenJsonNoteModal(mode, initialJson) {
-  var existing = document.getElementById('fapInboundJsonModal');
-  if (existing) existing.remove();
+function fapOpenInboundJsonModal(mode, initialJson) {
+  var old = document.getElementById('fapInboundJsonModal');
+  if (old) old.remove();
 
   var isImport = mode === 'import';
-  var modal = document.createElement('div');
-  modal.id = 'fapInboundJsonModal';
-  modal.style.cssText =
+  var wrap = document.createElement('div');
+  wrap.id = 'fapInboundJsonModal';
+  wrap.style.cssText =
     'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;' +
     'background:rgba(2,8,23,0.72);backdrop-filter:blur(10px);';
 
-  modal.innerHTML =
+  wrap.innerHTML =
     '<div style="width:100%;max-width:720px;border-radius:18px;padding:18px;' +
-      'background:rgba(15,23,42,0.9);border:1px solid rgba(125,211,252,0.35);' +
+      'background:rgba(15,23,42,0.92);border:1px solid rgba(125,211,252,0.35);' +
       'box-shadow:0 24px 60px rgba(0,0,0,0.65);color:#f8fafc;">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">' +
         '<div>' +
-          '<h3 style="margin:0;font-size:16px;">' + (isImport ? 'Import Inbound & Users JSON' : 'Export Inbound & Users JSON') + '</h3>' +
+          '<h3 style="margin:0;font-size:16px;">' + (isImport ? 'Import Inbound & Clients (JSON)' : 'Export Inbound & Clients (JSON)') + '</h3>' +
           '<div style="font-size:12px;opacity:0.75;margin-top:2px;">' +
             (isImport
-              ? 'Paste your Inbound JSON (including clients) below and click Create Inbound.'
-              : 'Copy or download the JSON of your inbound(s) and clients.') +
+              ? 'Paste Inbound JSON (including clients) into this note box and click Import.'
+              : 'Copy or download JSON of your inbounds and clients.') +
           '</div>' +
         '</div>' +
-        '<button type="button" id="fapCloseJsonModalBtn" style="background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;">&times;</button>' +
+        '<button type="button" id="fapCloseInboundJsonModal" style="background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;">&times;</button>' +
       '</div>' +
-      '<textarea id="fapJsonNoteTextarea" spellcheck="false" style="width:100%;min-height:300px;resize:vertical;padding:12px;border-radius:12px;' +
+      '<textarea id="fapInboundJsonTextarea" spellcheck="false" style="width:100%;min-height:300px;resize:vertical;padding:12px;border-radius:12px;' +
         'font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12.5px;line-height:1.5;' +
         'background:rgba(2,8,23,0.75);color:#e2e8f0;border:1px solid rgba(255,255,255,0.16);box-sizing:border-box;"></textarea>' +
-      '<div id="fapJsonModalFeedback" style="font-size:12px;margin-top:8px;min-height:18px;"></div>' +
+      '<div id="fapInboundJsonStatus" style="font-size:12px;margin-top:8px;min-height:18px;"></div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:12px;">' +
         (!isImport
-          ? '<button type="button" class="btn sm" id="fapCopyJsonNoteBtn">Copy JSON</button>' +
-            '<button type="button" class="btn sm primary" id="fapDownloadJsonNoteBtn">Download .json</button>'
-          : '<button type="button" class="btn sm primary" id="fapSubmitImportJsonBtn">Import & Create</button>') +
-        '<button type="button" class="btn sm" id="fapCancelJsonModalBtn">Close</button>' +
+          ? '<button type="button" class="btn sm" id="fapCopyInboundJsonBtn">Copy JSON</button>' +
+            '<button type="button" class="btn sm primary" id="fapDownloadInboundJsonBtn">Download .json</button>'
+          : '<button type="button" class="btn sm primary" id="fapRunImportInboundJsonBtn">Import & Create</button>') +
+        '<button type="button" class="btn sm" id="fapCancelInboundJsonBtn">Close</button>' +
       '</div>' +
     '</div>';
 
-  document.body.appendChild(modal);
+  document.body.appendChild(wrap);
 
-  var ta = document.getElementById('fapJsonNoteTextarea');
-  if (ta) ta.placeholder = JSON.stringify({ remark: "my-inbound", protocol: "vless", port: 443, clients: [{ email: "user1" }] }, null, 2);
-  var fb = document.getElementById('fapJsonModalFeedback');
-  if (!isImport && initialJson) {
-    ta.value = initialJson;
+  var ta = document.getElementById('fapInboundJsonTextarea');
+  var st = document.getElementById('fapInboundJsonStatus');
+  if (ta) {
+    ta.placeholder = JSON.stringify({
+      remark: 'vless-reality',
+      protocol: 'vless',
+      port: 443,
+      clients: [{ email: 'user1', uuid: 'replace-or-auto-uuid' }]
+    }, null, 2);
+    if (!isImport && initialJson) {
+      ta.value = initialJson;
+    }
   }
 
-  function closeModal() {
-    modal.remove();
-  }
-
-  document.getElementById('fapCloseJsonModalBtn').onclick = closeModal;
-  document.getElementById('fapCancelJsonModalBtn').onclick = closeModal;
-  modal.addEventListener('click', function (e) {
-    if (e.target === modal) closeModal();
-  });
+  function closeModal() { wrap.remove(); }
+  document.getElementById('fapCloseInboundJsonModal').onclick = closeModal;
+  document.getElementById('fapCancelInboundJsonBtn').onclick = closeModal;
+  wrap.addEventListener('click', function (e) { if (e.target === wrap) closeModal(); });
 
   if (!isImport) {
-    var copyBtn = document.getElementById('fapCopyJsonNoteBtn');
-    if (copyBtn) {
+    var copyBtn = document.getElementById('fapCopyInboundJsonBtn');
+    if (copyBtn && ta) {
       copyBtn.onclick = function () {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(ta.value).then(function () {
-            fb.style.color = '#34d399';
-            fb.textContent = 'JSON copied to clipboard.';
-          }).catch(function () {
-            ta.select();
-            document.execCommand('copy');
-            fb.style.color = '#34d399';
-            fb.textContent = 'JSON copied.';
-          });
-        }
+        navigator.clipboard.writeText(ta.value).then(function () {
+          st.style.color = '#34d399';
+          st.textContent = 'Copied to clipboard.';
+        }).catch(function () {
+          ta.select();
+          document.execCommand('copy');
+          st.style.color = '#34d399';
+          st.textContent = 'Copied.';
+        });
       };
     }
-    var dlBtn = document.getElementById('fapDownloadJsonNoteBtn');
-    if (dlBtn) {
+    var dlBtn = document.getElementById('fapDownloadInboundJsonBtn');
+    if (dlBtn && ta) {
       dlBtn.onclick = function () {
         var blob = new Blob([ta.value], { type: 'application/json' });
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
         a.href = url;
-        a.download = 'fastasiapanel-inbound-export.json';
+        a.download = 'inbounds-export.json';
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -1712,113 +1715,109 @@ function fapOpenJsonNoteModal(mode, initialJson) {
       };
     }
   } else {
-    var impBtn = document.getElementById('fapSubmitImportJsonBtn');
-    if (impBtn) {
+    var impBtn = document.getElementById('fapRunImportInboundJsonBtn');
+    if (impBtn && ta) {
       impBtn.onclick = function () {
         var raw = (ta.value || '').trim();
         if (!raw) {
-          fb.style.color = '#f87171';
-          fb.textContent = 'Please paste Inbound JSON first.';
+          st.style.color = '#f87171';
+          st.textContent = 'Please paste JSON first.';
           return;
         }
         impBtn.disabled = true;
-        fb.style.color = '#7dd3fc';
-        fb.textContent = 'Importing inbound & clients...';
+        st.style.color = '#7dd3fc';
+        st.textContent = 'Creating inbound & clients...';
 
-        fapImportInboundsFromJSONText(raw).then(function (summary) {
-          fb.style.color = '#34d399';
-          fb.textContent = summary;
-          setTimeout(closeModal, 700);
+        fapImportInboundsJSON(raw).then(function (msg) {
+          st.style.color = '#34d399';
+          st.textContent = msg;
+          setTimeout(closeModal, 650);
         }).catch(function (err) {
           impBtn.disabled = false;
-          fb.style.color = '#f87171';
-          fb.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+          st.style.color = '#f87171';
+          st.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
         });
       };
     }
   }
 }
 
-function fapBuildInboundExportJSON(singleInboundId) {
+function fapExportInboundsJSON() {
   var inbounds = (typeof state !== 'undefined' && Array.isArray(state.inbounds)) ? state.inbounds : [];
-  var selected = singleInboundId
-    ? inbounds.filter(function (ib) { return String(ib.id) === String(singleInboundId); })
-    : inbounds;
-
-  var data = selected.length === 1 && singleInboundId ? selected[0] : {
+  return JSON.stringify({
     version: '1.1.1',
     exported_at: new Date().toISOString(),
-    inbounds: selected
-  };
-
-  return JSON.stringify(data, null, 2);
+    inbounds: inbounds
+  }, null, 2);
 }
 
-async function fapImportInboundsFromJSONText(rawText) {
-  if (typeof api !== 'function') throw new Error('API helper not available');
-  var parsed = JSON.parse(rawText);
-  var list = Array.isArray(parsed)
+async function fapImportInboundsJSON(raw) {
+  if (typeof api !== 'function') throw new Error('API client not ready');
+  var parsed = JSON.parse(raw);
+  var items = Array.isArray(parsed)
     ? parsed
     : (Array.isArray(parsed.inbounds) ? parsed.inbounds : [parsed]);
 
-  if (!list.length) throw new Error('JSON does not contain any inbound object');
+  if (!items.length) throw new Error('No inbound object found in JSON');
 
-  var createdInbounds = 0;
-  var createdClients = 0;
+  var ibCount = 0;
+  var clCount = 0;
 
-  for (var i = 0; i < list.length; i++) {
-    var item = JSON.parse(JSON.stringify(list[i] || {}));
-    var clients = Array.isArray(item.clients) ? item.clients : (Array.isArray(item.users) ? item.users : []);
-    delete item.id;
-    delete item.clients;
-    delete item.users;
-    delete item.up;
-    delete item.down;
+  for (var i = 0; i < items.length; i++) {
+    var ib = JSON.parse(JSON.stringify(items[i] || {}));
+    var clients = Array.isArray(ib.clients) ? ib.clients : (Array.isArray(ib.users) ? ib.users : []);
+    delete ib.id;
+    delete ib.clients;
+    delete ib.users;
+    delete ib.up;
+    delete ib.down;
 
-    var created = await api('POST', 'inbounds', item);
-    var newInboundId = created && (created.id || (created.inbound && created.inbound.id));
-    createdInbounds++;
+    var res = await api('POST', 'inbounds', ib);
+    var inboundId = res && (res.id || (res.inbound && res.inbound.id));
+    ibCount++;
 
-    if (newInboundId && clients.length) {
-      for (var c = 0; c < clients.length; c++) {
-        var cl = JSON.parse(JSON.stringify(clients[c] || {}));
+    if (inboundId && clients.length) {
+      for (var j = 0; j < clients.length; j++) {
+        var cl = JSON.parse(JSON.stringify(clients[j] || {}));
         delete cl.id;
         delete cl.up;
         delete cl.down;
-        cl.inbound_id = newInboundId;
+        cl.inbound_id = inboundId;
         await api('POST', 'clients', cl);
-        createdClients++;
+        clCount++;
       }
     }
   }
 
-  if (typeof loadAll === 'function') {
-    await loadAll();
-  }
-  return 'Created ' + createdInbounds + ' inbound(s) and ' + createdClients + ' client(s).';
+  if (typeof loadAll === 'function') await loadAll();
+  return 'Imported ' + ibCount + ' inbound(s) and ' + clCount + ' client(s).';
 }
 
-function fapMountInboundsJsonControls() {
-  var container = fapFindInboundsContainer();
-  if (!container) return;
+function fapPlaceInboundJsonButtons() {
+  if (document.getElementById('fapInboundPageJsonBar')) return;
+  var target = fapFindInboundsHeaderTarget();
+  if (!target) return;
 
-  if (!document.getElementById('fapInboundsJsonControls')) {
-    var box = document.createElement('div');
-    box.id = 'fapInboundsJsonControls';
-    box.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0 14px;';
-    box.innerHTML =
-      '<button type="button" class="btn sm" id="fapOpenExportJsonBtn">Export JSON</button>' +
-      '<button type="button" class="btn sm" id="fapOpenImportJsonBtn">Import JSON (Paste)</button>';
-    container.prepend(box);
+  var bar = document.createElement('div');
+  bar.id = 'fapInboundPageJsonBar';
+  bar.style.cssText = 'display:inline-flex;gap:8px;align-items:center;margin-inline-start:12px;vertical-align:middle;';
+  bar.innerHTML =
+    '<button type="button" class="btn sm" id="fapInboundPageExportBtn">Export JSON</button>' +
+    '<button type="button" class="btn sm" id="fapInboundPageImportBtn">Import JSON</button>';
 
-    document.getElementById('fapOpenExportJsonBtn').onclick = function () {
-      fapOpenJsonNoteModal('export', fapBuildInboundExportJSON(null));
-    };
-    document.getElementById('fapOpenImportJsonBtn').onclick = function () {
-      fapOpenJsonNoteModal('import', '');
-    };
+  if (target.tagName && /^H[1-6]$/.test(target.tagName) && target.parentElement) {
+    target.parentElement.insertBefore(bar, target.nextSibling);
+  } else {
+    target.prepend(bar);
   }
+
+  document.getElementById('fapInboundPageExportBtn').onclick = function () {
+    fapOpenInboundJsonModal('export', fapExportInboundsJSON());
+  };
+  document.getElementById('fapInboundPageImportBtn').onclick = function () {
+    fapOpenInboundJsonModal('import', '');
+  };
 }
 
-setInterval(fapMountInboundsJsonControls, 1500);
-setTimeout(fapMountInboundsJsonControls, 400);
+setInterval(fapPlaceInboundJsonButtons, 1200);
+setTimeout(fapPlaceInboundJsonButtons, 300);
