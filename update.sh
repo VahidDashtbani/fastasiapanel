@@ -79,10 +79,33 @@ if [[ -z "${REMOTE_SHA}" ]]; then
 fi
 
 log_info "Building ${APP_NAME}..."
-(
-  cd "${SRC_DIR}/repo"
-  go build -o "${SRC_DIR}/${APP_NAME}" .
-)
+BUILT_OK=0
+if (
+  cd "${SRC_DIR}/repo" && GOTOOLCHAIN=local go build -o "${SRC_DIR}/${APP_NAME}" .
+); then
+  BUILT_OK=1
+elif (
+  cd "${SRC_DIR}/repo" && GOPROXY=https://goproxy.cn,https://goproxy.io,direct go build -o "${SRC_DIR}/${APP_NAME}" .
+); then
+  BUILT_OK=1
+fi
+
+if [[ "${BUILT_OK}" -ne 1 ]]; then
+  log_warn "Local go build failed (likely toolchain 403). Falling back to GitHub release asset..."
+  ASSET_URL="https://github.com/${REPO_OWNER_SLASH}/releases/latest/download/${APP_NAME}-linux-amd64.tar.gz"
+  if curl -fsSL "${ASSET_URL}" -o "${SRC_DIR}/panel.tar.gz" && tar -xzf "${SRC_DIR}/panel.tar.gz" -C "${SRC_DIR}"; then
+    found_bin="$(find "${SRC_DIR}" -maxdepth 2 -type f -name "${APP_NAME}" | head -n1 || true)"
+    if [[ -n "${found_bin}" && "${found_bin}" != "${SRC_DIR}/${APP_NAME}" ]]; then
+      cp -f "${found_bin}" "${SRC_DIR}/${APP_NAME}"
+    fi
+    [[ -f "${SRC_DIR}/${APP_NAME}" ]] && BUILT_OK=1
+  fi
+fi
+
+if [[ "${BUILT_OK}" -ne 1 ]]; then
+  log_warn "Failed to build or fetch ${APP_NAME} binary."
+  exit 1
+fi
 
 systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
 install -m 755 "${SRC_DIR}/${APP_NAME}" "${INSTALL_DIR}/${APP_NAME}"
