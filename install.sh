@@ -312,10 +312,17 @@ collect_user_configuration() {
             if ! command -v psql >/dev/null 2>&1 || ! systemctl is-active --quiet postgresql 2>/dev/null; then
                 if command -v apt-get >/dev/null 2>&1; then
                     log_info "Installing and starting PostgreSQL..."
-                    apt-get update -y >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql postgresql-contrib >/dev/null 2>&1 || true
+                    apt-get update -y >/dev/null 2>&1 || apt-get update -y --allow-insecure-repositories >/dev/null 2>&1 || true
+                    DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql postgresql-contrib >/dev/null 2>&1 || true
                 fi
                 systemctl enable --now postgresql >/dev/null 2>&1 || service postgresql start >/dev/null 2>&1 || true
             fi
+            for _ in $(seq 1 15); do
+                if command -v pg_isready >/dev/null 2>&1 && pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
+                    break
+                fi
+                sleep 1
+            done
 
             local pg_user="fastasiapanel"
             local pg_db="fastasiapanel"
