@@ -281,3 +281,90 @@ input:focus, select:focus, textarea:focus {
   border-color: rgba(56, 189, 248, 0.65) !important;
   box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.16) !important;
 }
+/* === FastAsiaPanel v1.1.6 Cosmic UI & Clients Layout Polish === */
+:root {
+  --cosmos-bg-deep: #060811;
+  --cosmos-bg-nebula: #0c1224;
+  --cosmos-card: rgba(15, 22, 44, 0.78);
+  --cosmos-card-hover: rgba(21, 31, 60, 0.92);
+  --cosmos-border: rgba(129, 140, 248, 0.22);
+  --cosmos-border-glow: rgba(56, 189, 248, 0.45);
+  --cosmos-cyan: #38bdf8;
+  --cosmos-violet: #a855f7;
+}
+
+body {
+  background:
+    radial-gradient(circle at 14% 12%, rgba(168, 85, 247, 0.15), transparent 36%),
+    radial-gradient(circle at 86% 18%, rgba(56, 189, 248, 0.14), transparent 40%),
+    radial-gradient(circle at 50% 96%, rgba(59, 130, 246, 0.11), transparent 48%),
+    linear-gradient(160deg, var(--cosmos-bg-deep) 0%, var(--cosmos-bg-nebula) 100%) !important;
+  background-attachment: fixed !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar, aside, nav.sidebar, .nav-panel, .nav {
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.card, .panel-card, .stat-card {
+  background: var(--cosmos-card);
+  border-color: var(--cosmos-border) !important;
+  box-shadow: 0 0 24px rgba(56, 189, 248, 0.10);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover, .stat-card:hover {
+  border-color: var(--cosmos-border-glow) !important;
+  box-shadow: 0 0 28px rgba(99, 102, 241, 0.18);
+}
+
+.btn.pri, button.primary, .btn-primary {
+  background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%) !important;
+  border: 1px solid rgba(125, 211, 252, 0.35) !important;
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.25);
+}
+
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 6px;
+}
+
+th {
+  white-space: nowrap;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  opacity: 0.85;
+}
+
+td, th {
+  vertical-align: middle !important;
+}
+
+tbody tr {
+  background: var(--cosmos-card);
+  transition: background 0.16s ease;
+}
+
+tbody tr:hover {
+  background: var(--cosmos-card-hover);
+}
+
+.fap-live-traffic-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  margin-inline-start: 8px !important;
+  padding: 2px 8px !important;
+  border-radius: 999px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  line-height: 1.25 !important;
+  white-space: nowrap !important;
+  vertical-align: middle !important;
+  background: rgba(56, 189, 248, 0.13) !important;
+  border: 1px solid rgba(56, 189, 248, 0.30) !important;
+  color: #7dd3fc !important;
+}

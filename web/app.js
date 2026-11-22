@@ -1987,27 +1987,21 @@ function fapUpdateLiveClientTrafficDOM(inbounds) {
       targetCell = cells.length >= 2 ? cells[cells.length - 2] : row;
     }
 
+    var staleBadges = row.querySelectorAll('.fap-live-traffic-badge');
+    for (var b = 0; b < staleBadges.length; b++) {
+      if (staleBadges[b].parentElement !== targetCell) {
+        staleBadges[b].remove();
+      }
+    }
+
     var badge = targetCell.querySelector('.fap-live-traffic-badge');
     if (!badge) {
       badge = document.createElement('span');
       badge.className = 'fap-live-traffic-badge';
-      badge.style.display = 'inline-flex';
-      badge.style.alignItems = 'center';
-      badge.style.gap = '6px';
-      badge.style.marginInlineStart = '8px';
-      badge.style.whiteSpace = 'nowrap';
-      badge.style.verticalAlign = 'middle';
-      badge.style.fontSize = '11.5px';
-      badge.style.lineHeight = '1.2';
-      badge.style.padding = '2px 7px';
-      badge.style.borderRadius = '6px';
-      badge.style.background = 'rgba(16, 185, 129, 0.12)';
-      badge.style.color = '#10b981';
       targetCell.appendChild(badge);
     }
     badge.textContent =
-      '↑ ' + fapFmtBytesLive(up) + ' (' + fapFmtRateLive(upRate) + ') · ' +
-      '↓ ' + fapFmtBytesLive(down) + ' (' + fapFmtRateLive(downRate) + ')';
+      '↑ ' + fapFmtRateLive(upRate) + ' · ↓ ' + fapFmtRateLive(downRate);
   }
 }
 
