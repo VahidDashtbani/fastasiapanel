@@ -391,11 +391,12 @@ update_panel() {
   export DB_DSN="${DB_DSN:-${FAP_DB_DSN:-${FAP_PG_DSN:-}}}"
   export FAP_DB_DSN="${FAP_DB_DSN:-${DB_DSN:-}}"
 
-  LOGI "Downloading latest installer and updating FastAsiaPanel while preserving credentials..."
-  local tmp_ins="/tmp/fastasia-install.$$.sh"
-  curl -fsSL "${INSTALL_URL}?v=$(date +%s)" -o "${tmp_ins}"
-  NON_INTERACTIVE=1 bash "${tmp_ins}"
-  rm -f "${tmp_ins}"
+  LOGI "Checking latest commit and running update.sh while preserving credentials and database..."
+  local update_url="https://raw.githubusercontent.com/VahidDashtbani/fastasiapanel/main/update.sh"
+  local tmp_upd="/tmp/fastasia-update.$$.sh"
+  curl -fsSL "${update_url}?v=$(date +%s)" -o "${tmp_upd}"
+  bash "${tmp_upd}"
+  rm -f "${tmp_upd}"
 
   for f in fastasiapanel.env panel.env install-result.env; do
     if [[ -f "${backup_tmp}/$f" ]]; then

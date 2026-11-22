@@ -304,7 +304,11 @@ collect_user_configuration() {
     WEB_BASE_PATH="$(normalize_web_base_path "${WEB_BASE_PATH}")"
 
     local db_choice
-    tty_read "Select database (1: SQLite [default], 2: PostgreSQL): " db_choice "${DB_CHOICE:-1}"
+    local default_db_choice="${DB_CHOICE:-1}"
+    if [[ "${DB_TYPE:-${FAP_DB_TYPE:-}}" == "postgres" || "${DB_DSN:-${FAP_DB_DSN:-}}" == postgres://* ]]; then
+        default_db_choice="2"
+    fi
+    tty_read "Select database (1: SQLite [default], 2: PostgreSQL): " db_choice "${default_db_choice}"
     if [[ "${db_choice}" == "2" ]]; then
         local auto_pg=""
         tty_read "Auto-setup PostgreSQL locally without entering DSN? [Y/n]: " auto_pg "y"
