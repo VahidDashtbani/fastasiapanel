@@ -2657,16 +2657,375 @@ document.addEventListener("DOMContentLoaded", () => {
 })();
 
 
+
+
+
 // === FAP QR & SUBSCRIPTION CONFIGS START ===
 (function() {
+  // الگوریتم تولید QR Code استاندارد (QR Code Model 2, Byte Mode, Reed-Solomon GF(256))
+  // کاملاً آفلاین و اسکن‌پذیر برای تمامی گوشی‌ها و اسکنرها
+  const QRGen = (function() {
+    const EXP = new Uint8Array(512);
+    const LOG = new Uint8Array(256);
+    let x = 1;
+    for (let i = 0; i < 255; i++) {
+      EXP[i] = x;
+      LOG[x] = i;
+      x <<= 1;
+      if (x & 0x100) x ^= 0x11d;
+    }
+    for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
+
+    function gfMul(a, b) {
+      if (a === 0 || b === 0) return 0;
+      return EXP[(LOG[a] + LOG[b]) % 255];
+    }
+
+    function rsPoly(ecLen) {
+      let poly = [1];
+      for (let i = 0; i < ecLen; i++) {
+        const next = new Array(poly.length + 1).fill(0);
+        for (let j = 0; j < poly.length; j++) {
+          next[j] ^= poly[j];
+          next[j + 1] ^= gfMul(poly[j], EXP[i]);
+        }
+        poly = next;
+      }
+      return poly;
+    }
+
+    function rsEncode(data, ecLen) {
+      const gen = rsPoly(ecLen);
+      const res = new Array(ecLen).fill(0);
+      for (let i = 0; i < data.length; i++) {
+        const factor = data[i] ^ res[0];
+        res.shift();
+        res.push(0);
+        for (let j = 0; j < ecLen; j++) {
+          res[j] ^= gfMul(gen[j], factor);
+        }
+      }
+      return res;
+    }
+
+    // نسخه‌های استاندارد QR با ECC سطح L/M برای طول‌های مختلف
+    const SPECS = [
+      // ver, size, totalCodewords, ecCodewordsPerBlock, blocksG1, dataPerBlockG1, blocksG2, dataPerBlockG2
+      [1,  21,  26,  7,  1, 19, 0, 0],
+      [2,  25,  44, 10,  1, 34, 0, 0],
+      [3,  29,  70, 15,  1, 55, 0, 0],
+      [4,  33, 100, 20,  1, 80, 0, 0],
+      [5,  37, 134, 26,  1, 108, 0, 0],
+      [6,  41, 172, 18,  2, 68, 0, 0],
+      [7,  45, 196, 20,  2, 78, 0, 0],
+      [8,  49, 242, 24,  2, 97, 0, 0],
+      [9,  53, 292, 30,  2, 116, 0, 0],
+      [10, 57, 346, 18,  2, 68, 2, 69],
+      [12, 65, 464, 22,  2, 81, 4, 82],
+      [14, 73, 582, 26,  4, 90, 1, 91],
+      [16, 81, 728, 30,  5, 98, 2, 99],
+      [18, 89, 896, 28,  5, 108, 4, 109],
+      [20, 97, 1088, 28, 6, 114, 5, 115],
+      [22, 105, 1276, 28, 8, 120, 4, 121],
+      [25, 117, 1600, 30, 10, 126, 6, 127]
+    ];
+
+    function alignCenters(ver) {
+      if (ver === 1) return [];
+      const count = Math.floor(ver / 7) + 2;
+      const size = ver * 4 + 17;
+      if (count === 2) return [6, size - 7];
+      const first = 6;
+      const last = size - 7;
+      const step = Math.round((last - first) / (count - 1));
+      const coords = [first];
+      for (let i = 1; i < count - 1; i++) {
+        coords.push(Math.round(first + (i * (last - first)) / (count - 1)));
+      }
+      coords.push(last);
+      return coords;
+    }
+
+    function encodeBits(text) {
+      const bytes = new TextEncoder().encode(text);
+      for (const spec of SPECS) {
+        const [ver, size, totalCw, ecCw, b1, d1, b2, d2] = spec;
+        const dataCap = b1 * d1 + b2 * d2;
+        const ccBits = ver <= 9 ? 8 : 16;
+        // mode (4) + charCount (ccBits) + bytes*8 + terminator (up to 4)
+        const maxPayloadBytes = Math.floor((dataCap * 8 - 4 - ccBits) / 8);
+        if (bytes.length > maxPayloadBytes) continue;
+
+        const bits = [];
+        const pushBits = (val, len) => {
+          for (let i = len - 1; i >= 0; i--) bits.push((val >> i) & 1);
+        };
+        pushBits(0b0100, 4); // Byte mode
+        pushBits(bytes.length, ccBits);
+        for (const b of bytes) pushBits(b, 8);
+        const termLen = Math.min(4, dataCap * 8 - bits.length);
+        pushBits(0, termLen);
+        while (bits.length % 8 !== 0) bits.push(0);
+
+        const dataCw = [];
+        for (let i = 0; i < bits.length; i += 8) {
+          let byte = 0;
+          for (let j = 0; j < 8; j++) byte = (byte << 1) | bits[i + j];
+          dataCw.push(byte);
+        }
+        const padBytes = [0xec, 0x11];
+        let pIdx = 0;
+        while (dataCw.length < dataCap) {
+          dataCw.push(padBytes[pIdx % 2]);
+          pIdx++;
+        }
+
+        // Split into blocks and compute RS ECC
+        const dataBlocks = [];
+        const eccBlocks = [];
+        let offset = 0;
+        for (let i = 0; i < b1; i++) {
+          const blk = dataCw.slice(offset, offset + d1);
+          offset += d1;
+          dataBlocks.push(blk);
+          eccBlocks.push(rsEncode(blk, ecCw));
+        }
+        for (let i = 0; i < b2; i++) {
+          const blk = dataCw.slice(offset, offset + d2);
+          offset += d2;
+          dataBlocks.push(blk);
+          eccBlocks.push(rsEncode(blk, ecCw));
+        }
+
+        const interleaved = [];
+        const maxD = Math.max(d1, d2);
+        for (let i = 0; i < maxD; i++) {
+          for (const blk of dataBlocks) if (i < blk.length) interleaved.push(blk[i]);
+        }
+        for (let i = 0; i < ecCw; i++) {
+          for (const eblk of eccBlocks) interleaved.push(eblk[i]);
+        }
+
+        const finalBits = [];
+        for (const cw of interleaved) {
+          for (let i = 7; i >= 0; i--) finalBits.push((cw >> i) & 1);
+        }
+
+        return buildMatrix(ver, size, finalBits);
+      }
+      return null;
+    }
+
+    function buildMatrix(ver, size, dataBits) {
+      const mat = Array.from({ length: size }, () => new Int8Array(size)); // 0 empty, 1 dark, -1 light
+      const locked = Array.from({ length: size }, () => new Uint8Array(size));
+
+      const setMod = (r, c, dark) => {
+        if (r < 0 || r >= size || c < 0 || c >= size) return;
+        mat[r][c] = dark ? 1 : -1;
+        locked[r][c] = 1;
+      };
+
+      const placeFinder = (top, left) => {
+        for (let r = -1; r <= 7; r++) {
+          for (let c = -1; c <= 7; c++) {
+            const rr = top + r, cc = left + c;
+            if (rr < 0 || rr >= size || cc < 0 || cc >= size) continue;
+            const inBox = r >= 0 && r <= 6 && c >= 0 && c <= 6;
+            const border = r === 0 || r === 6 || c === 0 || c === 6;
+            const center = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+            setMod(rr, cc, inBox && (border || center));
+          }
+        }
+      };
+
+      placeFinder(0, 0);
+      placeFinder(0, size - 7);
+      placeFinder(size - 7, 0);
+
+      // Alignment patterns
+      const centers = alignCenters(ver);
+      for (const r of centers) {
+        for (const c of centers) {
+          if (locked[r][c]) continue;
+          for (let dr = -2; dr <= 2; dr++) {
+            for (let dc = -2; dc <= 2; dc++) {
+              const isEdge = Math.abs(dr) === 2 || Math.abs(dc) === 2;
+              const isCenter = dr === 0 && dc === 0;
+              setMod(r + dr, c + dc, isEdge || isCenter);
+            }
+          }
+        }
+      }
+
+      // Timing patterns
+      for (let i = 8; i < size - 8; i++) {
+        if (!locked[6][i]) setMod(6, i, i % 2 === 0);
+        if (!locked[i][6]) setMod(i, 6, i % 2 === 0);
+      }
+
+      // Dark module
+      setMod(size - 8, 8, true);
+
+      // Reserve format info cells
+      for (let i = 0; i < 9; i++) {
+        if (i !== 6) {
+          locked[8][i] = 1;
+          locked[i][8] = 1;
+        }
+      }
+      for (let i = 0; i < 8; i++) {
+        locked[8][size - 1 - i] = 1;
+        locked[size - 1 - i][8] = 1;
+      }
+
+      // Version info for ver >= 7
+      if (ver >= 7) {
+        let vBits = ver;
+        let rem = vBits << 12;
+        const poly = 0x1f25;
+        for (let i = 17; i >= 12; i--) {
+          if ((rem >> i) & 1) rem ^= poly << (i - 12);
+        }
+        const verInfo = (ver << 12) | rem;
+        for (let i = 0; i < 18; i++) {
+          const bit = ((verInfo >> i) & 1) === 1;
+          const r = Math.floor(i / 3);
+          const c = size - 11 + (i % 3);
+          setMod(r, c, bit);
+          setMod(c, r, bit);
+        }
+      }
+
+      // Place data bits in zigzag
+      let bitIdx = 0;
+      let upward = true;
+      for (let col = size - 1; col >= 1; col -= 2) {
+        if (col === 6) col = 5;
+        for (let step = 0; step < size; step++) {
+          const row = upward ? (size - 1 - step) : step;
+          for (let dx = 0; dx < 2; dx++) {
+            const c = col - dx;
+            if (locked[row][c]) continue;
+            const bit = bitIdx < dataBits.length ? dataBits[bitIdx++] : 0;
+            mat[row][c] = bit === 1 ? 1 : -1;
+          }
+        }
+        upward = !upward;
+      }
+
+      // Apply mask 0: (r + c) % 2 === 0
+      const mask0 = (r, c) => ((r + c) % 2) === 0;
+      for (let r = 0; r < size; r++) {
+        for (let c = 0; c < size; c++) {
+          if (!locked[r][c]) {
+            const isDark = mat[r][c] === 1;
+            mat[r][c] = (isDark ^ mask0(r, c)) ? 1 : -1;
+          }
+        }
+      }
+
+      // Format info for ECC L (01) and mask 0 (000) => 01000
+      const fmtData = 0b01000;
+      let fRem = fmtData << 10;
+      const gPoly = 0x537;
+      for (let i = 14; i >= 10; i--) {
+        if ((fRem >> i) & 1) fRem ^= gPoly << (i - 10);
+      }
+      const fmtBits = ((fmtData << 10) | fRem) ^ 0x5412;
+
+      const placeFormat = (bitsVal) => {
+        for (let i = 0; i < 15; i++) {
+          const dark = ((bitsVal >> (14 - i)) & 1) === 1;
+          if (i < 6) {
+            mat[8][i] = dark ? 1 : -1;
+          } else if (i === 6) {
+            mat[8][7] = dark ? 1 : -1;
+          } else if (i === 7) {
+            mat[8][8] = dark ? 1 : -1;
+          } else if (i === 8) {
+            mat[7][8] = dark ? 1 : -1;
+          } else {
+            mat[14 - i][8] = dark ? 1 : -1;
+          }
+
+          if (i < 8) {
+            mat[size - 1 - i][8] = dark ? 1 : -1;
+          } else {
+            mat[8][size - 15 + i] = dark ? 1 : -1;
+          }
+        }
+      };
+      placeFormat(fmtBits);
+
+      return { size, mat };
+    }
+
+    function toSvg(text, pxSize) {
+      const built = encodeBits(text);
+      if (!built) return "";
+      const { size, mat } = built;
+      const quiet = 4;
+      const total = size + quiet * 2;
+      let rects = "";
+      for (let r = 0; r < size; r++) {
+        for (let c = 0; c < size; c++) {
+          if (mat[r][c] === 1) {
+            rects += `<rect x="${c + quiet}" y="${r + quiet}" width="1" height="1" fill="#000000"/>`;
+          }
+        }
+      }
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total} ${total}" width="${pxSize}" height="${pxSize}" shape-rendering="crispEdges"><rect width="${total}" height="${total}" fill="#ffffff"/>${rects}</svg>`;
+    }
+
+    return { toSvg };
+  })();
+
   let activeQrTab = "config";
   let currentQrPayload = { config: "", subscription: "", title: "QR Code" };
+
+  function tryDecodeBase64Utf8(str) {
+    if (!str) return "";
+    const cleaned = String(str).replace(/\s+/g, "");
+    if (!/^[A-Za-z0-9+/=_-]+$/.test(cleaned) || cleaned.length < 16) return "";
+    try {
+      const norm = cleaned.replace(/-/g, "+").replace(/_/g, "/");
+      const pad = norm.length % 4 === 0 ? "" : "=".repeat(4 - (norm.length % 4));
+      const bin = atob(norm + pad);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const decoded = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+      if (/(vless|vmess|trojan|ss|ssr|hysteria2|hy2|tuic|wireguard):\/\//i.test(decoded)) {
+        return decoded.trim();
+      }
+      return "";
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function extractConfigsFromText(raw) {
+    if (!raw) return [];
+    const lines = String(raw).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const results = [];
+    for (const ln of lines) {
+      if (/(vless|vmess|trojan|ss|ssr|hysteria2|hy2|tuic|wireguard):\/\//i.test(ln)) {
+        results.push(ln);
+      } else {
+        const dec = tryDecodeBase64Utf8(ln);
+        if (dec) {
+          dec.split(/\r?\n/).map(s => s.trim()).filter(Boolean).forEach(u => results.push(u));
+        }
+      }
+    }
+    return Array.from(new Set(results));
+  }
 
   function detectSubUrl(obj) {
     if (!obj || typeof obj !== "object") return "";
     const direct = obj.subUrl || obj.subscriptionUrl || obj.sub_url || obj.subscription_url || obj.subLink || "";
     if (direct) return String(direct);
-    const token = obj.subId || obj.sub_id || obj.subToken || obj.token || obj.id || "";
+    const token = obj.subId || obj.sub_id || obj.subToken || obj.token || "";
     if (!token) return "";
     const origin = window.location.origin;
     const baseMatch = window.location.pathname.match(/^(\/[^/]+)/);
@@ -2676,59 +3035,33 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function detectConfigText(obj) {
     if (!obj) return "";
-    if (typeof obj === "string") return obj;
-    if (Array.isArray(obj.configs) && obj.configs.length) {
-      return obj.configs.map(c => typeof c === "string" ? c : (c.link || c.uri || c.url || "")).filter(Boolean).join("\n");
+    if (typeof obj === "string") {
+      const found = extractConfigsFromText(obj);
+      return found.length ? found[0] : obj.trim();
     }
-    return String(obj.config || obj.link || obj.uri || obj.url || obj.vless || obj.vmess || obj.trojan || obj.ss || "");
+    if (Array.isArray(obj.configs) && obj.configs.length) {
+      const links = obj.configs.map(c => typeof c === "string" ? c : (c.link || c.uri || c.url || "")).filter(Boolean);
+      if (links.length) return links[0];
+    }
+    const candidate = String(obj.config || obj.link || obj.uri || obj.url || obj.vless || obj.vmess || obj.trojan || obj.ss || "");
+    const decoded = extractConfigsFromText(candidate);
+    return decoded.length ? decoded[0] : candidate.trim();
   }
 
-  function renderCompactQr(text) {
+  function renderScannableQr(text) {
     const box = document.getElementById("fapQrCanvasBox");
     if (!box) return;
-    box.innerHTML = "";
     const val = (text || "").trim();
     if (!val) {
-      box.innerHTML = '<span style="color:#0f172a;font-size:12px;text-align:center;">No link available</span>';
+      box.innerHTML = '<span style="color:#0f172a;font-size:12px;">No link available</span>';
       return;
     }
-
-    // اگر لینک طولانی چند کانفیگ است، خط اول را برای QR تمیز انتخاب می‌کنیم
-    const qrText = val.includes("\n") ? val.split("\n")[0].trim() : val;
-
-    if (typeof window.QRCode === "function") {
-      try {
-        new window.QRCode(box, {
-          text: qrText,
-          width: 180,
-          height: 180,
-          colorDark: "#000000",
-          colorLight: "#ffffff"
-        });
-        const generated = box.querySelector("canvas, img");
-        if (generated) {
-          generated.style.width = "180px";
-          generated.style.height = "180px";
-          generated.style.maxWidth = "180px";
-          generated.style.maxHeight = "180px";
-          generated.style.display = "block";
-        }
-        return;
-      } catch (_) {}
+    const svg = QRGen.toSvg(val, 196);
+    if (svg) {
+      box.innerHTML = svg;
+    } else {
+      box.innerHTML = `<div style="color:#0f172a;font-size:11px;word-break:break-all;padding:6px;text-align:center;">${val.replace(/</g, "&lt;")}</div>`;
     }
-
-    const img = document.createElement("img");
-    img.alt = "QR";
-    img.src = "https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=4&data=" + encodeURIComponent(qrText);
-    img.style.width = "180px";
-    img.style.height = "180px";
-    img.style.maxWidth = "180px";
-    img.style.maxHeight = "180px";
-    img.style.display = "block";
-    img.onerror = function() {
-      box.innerHTML = '<div style="color:#0f172a;font-size:11px;word-break:break-all;padding:6px;text-align:center;">' + qrText.replace(/</g, "&lt;") + '</div>';
-    };
-    box.appendChild(img);
   }
 
   function refreshQrModalState() {
@@ -2756,7 +3089,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (inputEl) {
       inputEl.value = val || "";
     }
-    renderCompactQr(val || "");
+    renderScannableQr(val || "");
   }
 
   window.openFapQrModal = function(item, preferredTab) {
@@ -2785,98 +3118,72 @@ document.addEventListener("DOMContentLoaded", () => {
     if (modal) modal.style.display = "none";
   };
 
-  // تزریق لیست کانفیگ‌ها به بخش Subscription در صفحه
-  function populateSubscriptionConfigs(sourceItems) {
-    const items = Array.isArray(sourceItems) ? sourceItems : [];
-    const subContainers = Array.from(document.querySelectorAll('[id*="sub" i], [data-page*="sub" i], [class*="subscription" i]'))
-      .filter(el => el.offsetParent !== null || el.id.toLowerCase().includes("sub"));
+  // پیدا کردن کانفیگ‌ها از متن خام اشتراک یا آیتم‌های صفحه Subscription
+  function renderConfigsIntoSubscriptionArea() {
+    const allNodes = Array.from(document.querySelectorAll("section, div, main, article, .card, .tab-pane, .page"));
+    const subSections = allNodes.filter(el => {
+      if (el.id === "fapQrModal" || el.classList.contains("fap-sub-configs-box")) return false;
+      const txt = el.innerText || "";
+      return txt.includes("کد اشتراک") && txt.includes("خروجی خام اشتراک");
+    });
 
-    for (const container of subContainers) {
-      if (container.id === "fapQrModal") continue;
-      let listBox = container.querySelector(".fap-sub-configs-panel");
-      if (!listBox) {
-        listBox = document.createElement("div");
-        listBox.className = "fap-sub-configs-panel";
-        listBox.style.cssText = "margin-top:14px;padding:12px;border-radius:10px;border:1px solid rgba(129,140,248,0.25);background:rgba(15,23,42,0.55);display:grid;gap:8px;";
-        container.appendChild(listBox);
-      }
+    // کوچک‌ترین کانتینر شامل بخش Subscription را انتخاب می‌کنیم
+    subSections.sort((a, b) => (a.innerText || "").length - (b.innerText || "").length);
+    const targetContainer = subSections[0];
+    if (!targetContainer) return;
 
-      const configs = [];
-      for (const row of items) {
-        if (!row || typeof row !== "object") continue;
-        const subUrl = detectSubUrl(row);
-        const cfgStr = detectConfigText(row);
-        if (Array.isArray(row.configs)) {
-          row.configs.forEach((c, i) => {
-            const link = typeof c === "string" ? c : (c.link || c.uri || c.url || "");
-            if (link) configs.push({ label: c.remark || c.name || c.tag || row.email || `Config #${i+1}`, config: link, subscription: subUrl });
-          });
-        } else if (cfgStr) {
-          cfgStr.split("\n").map(s => s.trim()).filter(Boolean).forEach((link, i) => {
-            configs.push({ label: row.email || row.remark || row.name || `Config #${i+1}`, config: link, subscription: subUrl });
-          });
-        }
-      }
-
-      if (!configs.length) {
-        listBox.innerHTML = '<div style="font-size:12px;color:#94a3b8;">No configs found for subscription yet.</div>';
-        continue;
-      }
-
-      listBox.innerHTML = '<div style="font-size:13px;font-weight:600;color:#e2e8f0;">Subscription Configs (' + configs.length + ')</div>';
-      configs.forEach((entry, idx) => {
-        const line = document.createElement("div");
-        line.style.cssText = "display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;background:rgba(2,6,23,0.65);border:1px solid rgba(255,255,255,0.08);";
-
-        const txt = document.createElement("input");
-        txt.type = "text";
-        txt.readOnly = true;
-        txt.value = entry.config;
-        txt.title = entry.label;
-        txt.style.cssText = "flex:1;min-width:0;padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:#090d1a;color:#cbd5e1;font-family:monospace;font-size:11px;";
-
-        const copyBtn = document.createElement("button");
-        copyBtn.type = "button";
-        copyBtn.textContent = "Copy";
-        copyBtn.style.cssText = "padding:6px 10px;border-radius:6px;border:1px solid rgba(148,163,184,0.3);background:rgba(255,255,255,0.08);color:#f8fafc;cursor:pointer;font-size:11px;";
-        copyBtn.onclick = async () => {
-          try { await navigator.clipboard.writeText(entry.config); } catch (_) {}
-        };
-
-        const qrBtn = document.createElement("button");
-        qrBtn.type = "button";
-        qrBtn.textContent = "QR";
-        qrBtn.style.cssText = "padding:6px 10px;border-radius:6px;border:1px solid rgba(129,140,248,0.5);background:rgba(79,70,229,0.3);color:#fff;cursor:pointer;font-size:11px;";
-        qrBtn.onclick = () => window.openFapQrModal({ email: entry.label, config: entry.config, subUrl: entry.subscription }, "config");
-
-        line.appendChild(txt);
-        line.appendChild(copyBtn);
-        line.appendChild(qrBtn);
-        listBox.appendChild(line);
-      });
+    let box = targetContainer.querySelector(".fap-sub-configs-box");
+    if (!box) {
+      box = document.createElement("div");
+      box.className = "fap-sub-configs-box";
+      box.style.cssText = "margin-top:14px;padding:14px;border-radius:12px;border:1px solid rgba(129,140,248,0.35);background:rgba(15,23,42,0.75);display:grid;gap:10px;";
+      targetContainer.appendChild(box);
     }
-  }
 
-  // هوک روی fetch تا هر زمان لیست کلاینت‌ها یا سابسکریپشن دریافت شد، کانفیگ‌ها در بخش Subscription هم پر شوند
-  if (typeof window.fetch === "function" && !window.__fapSubFetchHooked) {
-    window.__fapSubFetchHooked = true;
-    const origFetch = window.fetch.bind(window);
-    window.fetch = async function(...args) {
-      const res = await origFetch(...args);
-      try {
-        const urlStr = typeof args[0] === "string" ? args[0] : (args[0]?.url || "");
-        if (/client|user|sub/i.test(urlStr)) {
-          const clone = res.clone();
-          const data = await clone.json().catch(() => null);
-          const arr = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : (Array.isArray(data?.clients) ? data.clients : []));
-          if (arr.length) {
-            window.__fapClientsCache = arr;
-            populateSubscriptionConfigs(arr);
-          }
-        }
-      } catch (_) {}
-      return res;
-    };
+    const foundConfigs = extractConfigsFromText(targetContainer.innerText || "");
+    const subLinkMatch = (targetContainer.innerText || "").match(/https?:\/\/[^\s]+\/sub\/[^\s]+/i);
+    const subUrl = subLinkMatch ? subLinkMatch[0].trim() : "";
+
+    if (!foundConfigs.length) {
+      box.innerHTML = '<div style="font-size:12px;color:#94a3b8;">کانفیگی در این اشتراک پیدا نشد.</div>';
+      return;
+    }
+
+    box.innerHTML = `<div style="font-size:13px;font-weight:700;color:#e2e8f0;">کانفیگ‌های اشتراک (${foundConfigs.length})</div>`;
+
+    foundConfigs.forEach((cfgLink, idx) => {
+      const hashIdx = cfgLink.indexOf("#");
+      const label = hashIdx > -1 ? decodeURIComponent(cfgLink.slice(hashIdx + 1)) : `Config #${idx + 1}`;
+
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:rgba(2,6,23,0.8);border:1px solid rgba(255,255,255,0.09);";
+
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.readOnly = true;
+      inp.value = cfgLink;
+      inp.title = label;
+      inp.style.cssText = "flex:1;min-width:0;padding:7px 9px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:#070b17;color:#e2e8f0;font-family:monospace;font-size:11px;";
+
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.textContent = "کپی کانفیگ";
+      copyBtn.style.cssText = "padding:7px 11px;border-radius:6px;border:1px solid rgba(148,163,184,0.3);background:rgba(255,255,255,0.08);color:#f8fafc;cursor:pointer;font-size:11px;white-space:nowrap;";
+      copyBtn.onclick = async () => {
+        try { await navigator.clipboard.writeText(cfgLink); } catch (_) {}
+      };
+
+      const qrBtn = document.createElement("button");
+      qrBtn.type = "button";
+      qrBtn.textContent = "QR کانفیگ";
+      qrBtn.style.cssText = "padding:7px 11px;border-radius:6px;border:1px solid rgba(129,140,248,0.5);background:rgba(79,70,229,0.35);color:#fff;cursor:pointer;font-size:11px;white-space:nowrap;";
+      qrBtn.onclick = () => window.openFapQrModal({ email: label, config: cfgLink, subUrl }, "config");
+
+      row.appendChild(inp);
+      row.appendChild(copyBtn);
+      row.appendChild(qrBtn);
+      box.appendChild(row);
+    });
   }
 
   document.addEventListener("DOMContentLoaded", () => {
@@ -2895,26 +3202,8 @@ document.addEventListener("DOMContentLoaded", () => {
       try { await navigator.clipboard.writeText(inp.value); } catch (_) {}
     });
 
-    // اگر دکمه‌های QR موجود در صفحه کلیک شدند ولی مودال باز نشد، مودال استاندارد را باز کند
-    document.addEventListener("click", (e) => {
-      const target = e.target.closest("button, a");
-      if (!target) return;
-      const txt = (target.textContent || "").trim().toLowerCase();
-      const title = (target.getAttribute("title") || "").toLowerCase();
-      if (txt === "qr" || title.includes("qr")) {
-        const modal = document.getElementById("fapQrModal");
-        if (modal && modal.style.display !== "flex") {
-          const row = target.closest("tr, .card, .item, [data-id]");
-          const rowText = row ? (row.innerText || "") : "";
-          const cached = Array.isArray(window.__fapClientsCache) ? window.__fapClientsCache : [];
-          const matched = cached.find(c => c.email && rowText.includes(c.email)) || { config: rowText };
-          window.openFapQrModal(matched, "config");
-        }
-      }
-      if (txt.includes("subscription") || title.includes("subscription")) {
-        setTimeout(() => populateSubscriptionConfigs(window.__fapClientsCache || []), 120);
-      }
-    });
+    setInterval(renderConfigsIntoSubscriptionArea, 1200);
+    setTimeout(renderConfigsIntoSubscriptionArea, 400);
   });
 })();
 // === FAP QR & SUBSCRIPTION CONFIGS END ===
