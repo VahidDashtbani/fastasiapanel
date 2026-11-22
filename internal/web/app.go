@@ -65,6 +65,8 @@ type clientView struct {
 	Flow        string `json:"flow"`
 	Link        string `json:"link"`
 	SubURL      string `json:"sub_url"`
+	LiveUp   int64 `json:"live_up"`
+	LiveDown int64 `json:"live_down"`
 }
 
 type inboundView struct {
@@ -436,13 +438,12 @@ func (a *App) status(w http.ResponseWriter, r *http.Request) {
 	var up, down int64
 	active := 0
 	online := 0
-	nowMs := time.Now().UnixMilli()
 	for _, c := range st.Clients {
 		up += c.Up
 		down += c.Down
 		if c.Enable {
 			active++
-			if c.FirstSeenAt > 0 && nowMs-c.FirstSeenAt < 180000 {
+			if _, _, ok := a.xr.Live(c.Email); ok {
 				online++
 			}
 		}
@@ -514,7 +515,6 @@ func (a *App) realityKeys(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) views(st store.State, host string, subBase string) []inboundView {
 	out := make([]inboundView, 0, len(st.Inbounds))
-	nowMs := time.Now().UnixMilli()
 	for _, in := range st.Inbounds {
 		o, _ := xray.ParseOptions(in.Raw)
 		v := inboundView{
@@ -534,13 +534,15 @@ func (a *App) views(st store.State, host string, subBase string) []inboundView {
 			if c.SubID != "" {
 				subURL = subBase + "/" + c.SubID
 			}
-			isOnline := c.Enable && c.FirstSeenAt > 0 && (nowMs-c.FirstSeenAt < 180000)
+			liveUp, liveDown, liveOk := a.xr.Live(c.Email)
+			isOnline := c.Enable && liveOk
 			v.Clients = append(v.Clients, clientView{
 				ID: c.ID, InboundID: c.InboundID, Email: c.Email, UUID: c.UUID,
 				SubID: c.SubID, TgID: c.TgID, QuotaGroup: c.QuotaGroup, HWID: c.HWID,
 				Comment: c.Comment, Enable: c.Enable, Online: isOnline,
 				TotalBytes: c.TotalBytes, ExpiryAt: c.ExpiryAt, FirstSeenAt: c.FirstSeenAt,
 				LimitIP: c.LimitIP, Reset: c.Reset, Up: c.Up, Down: c.Down,
+				LiveUp: liveUp, LiveDown: liveDown,
 				Flow: xray.ClientFlow(c), Link: xray.BuildLink(in, c, host), SubURL: subURL,
 			})
 		}

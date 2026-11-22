@@ -303,7 +303,7 @@
       var used = upVal + downVal;
       var pct = c.total_bytes > 0 ? Math.min(100, Math.round(used * 100 / c.total_bytes)) : 0;
       var barCls = pct >= 100 ? 'full' : pct >= 85 ? 'high' : '';
-      var liveSub = '<div class="sub num" data-cl-ud="' + esc(c.id || c.email || '') + '">&uarr; ' + fmtBytes(upVal) + ' &middot; &darr; ' + fmtBytes(downVal) + '</div>';
+      var liveSub = '<div class="sub num" data-cl-ud="' + esc(c.id || c.email || '') + '">&uarr; ' + fmtBytes(c.live_up || 0) + '/s &middot; &darr; ' + fmtBytes(c.live_down || 0) + '/s</div>';
       var usage = (c.total_bytes > 0
         ? '<span class="bar ' + barCls + '"><i data-pct="' + pct + '"></i></span><span class="num" data-cl-total="' + esc(c.id || c.email || '') + '">' + fmtBytes(used) + ' / ' + fmtBytes(c.total_bytes) + '</span>'
         : '<span class="num" data-cl-total="' + esc(c.id || c.email || '') + '">' + fmtBytes(used) + '</span> <span class="tag soft">Unlimited</span>') + liveSub;
@@ -381,7 +381,7 @@
             if (!cl) return;
             var u = cl.up || 0;
             var d = cl.down || 0;
-            el.innerHTML = '&uarr; ' + fmtBytes(u) + ' &middot; &darr; ' + fmtBytes(d);
+            el.innerHTML = '&uarr; ' + fmtBytes(cl.live_up || 0) + '/s &middot; &darr; ' + fmtBytes(cl.live_down || 0) + '/s';
             var totEl = document.querySelector('[data-cl-total="' + CSS.escape(key) + '"]');
             if (totEl) {
               var sum = u + d;

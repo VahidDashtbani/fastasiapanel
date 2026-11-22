@@ -24,6 +24,48 @@ type Manager struct {
 	done    chan struct{}
 	running atomic.Bool
 	timer   *time.Timer
+	liveMu  sync.RWMutex
+	live    map[string]liveStat
+}
+
+type liveStat struct {
+	at       int64
+	up, down int64
+}
+
+func (m *Manager) setLive(users map[string]delta, now int64) {
+	m.liveMu.Lock()
+	defer m.liveMu.Unlock()
+	if m.live == nil {
+		m.live = map[string]liveStat{}
+	}
+	for email, d := range users {
+		if d.up > 0 || d.down > 0 {
+			m.live[email] = liveStat{at: now, up: d.up, down: d.down}
+		}
+	}
+	for email, s := range m.live {
+		if now-s.at > 60000 {
+			delete(m.live, email)
+		}
+	}
+}
+
+func (m *Manager) Live(email string) (up, down int64, online bool) {
+	m.liveMu.RLock()
+	s, ok := m.live[email]
+	m.liveMu.RUnlock()
+	if !ok {
+		return 0, 0, false
+	}
+	age := time.Now().UnixMilli() - s.at
+	if age > 10000 {
+		return 0, 0, false
+	}
+	if age > 2500 {
+		return 0, 0, true
+	}
+	return s.up, s.down, true
 }
 
 func NewManager(cfg config.Config, st *store.Store) *Manager {
@@ -210,6 +252,7 @@ func (m *Manager) tick() {
 	}
 	userDeltas, inboundDeltas := m.queryStats()
 	now := time.Now().UnixMilli()
+	m.setLive(userDeltas, now)
 	need := len(userDeltas) > 0 || len(inboundDeltas) > 0
 
 	if !need {
