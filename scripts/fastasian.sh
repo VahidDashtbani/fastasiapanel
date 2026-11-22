@@ -799,7 +799,16 @@ if [[ $# -gt 0 ]]; then
     enable) enable_autostart ;;
     disable) disable_autostart ;;
     log) journalctl -u "${SERVICE_NAME}" -e --no-pager -f ;;
-    update) update_panel ;;
+    update)
+        tmp_upd="$(mktemp)"
+        if curl -fsSL "https://raw.githubusercontent.com/VahidDashtbani/fastasiapanel/main/update.sh?v=$(date +%s)" -o "${tmp_upd}" && bash "${tmp_upd}"; then
+            rm -f "${tmp_upd}"
+        else
+            rm -f "${tmp_upd}"
+            echo "[ERR] Failed to run update.sh" >&2
+            return 1
+        fi
+        ;;
     uninstall) uninstall_panel ;;
     *) show_usage ;;
   esac

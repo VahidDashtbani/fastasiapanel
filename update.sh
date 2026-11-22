@@ -1,65 +1,103 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="https://github.com/VahidDashtbani/fastasiapanel.git"
-SRC_DIR="${SRC_DIR:-}"
-for d in "/opt/fastasiapanel" "/root/fastasiapanel" "$HOME/fastasiapanel" "/home/vahidnet/Downloads/fastasiapanel"; do
-  if [ -d "$d/.git" ]; then
-    SRC_DIR="$d"
-    break
+REPO_OWNER_SLASH="VahidDashtbani/fastasiapanel"
+REPO_URL="https://github.com/${REPO_OWNER_SLASH}.git"
+API_COMMIT_URL="https://api.github.com/repos/${REPO_OWNER_SLASH}/commits/main"
+
+APP_NAME="fastasiapanel"
+INSTALL_DIR="/usr/local/bin"
+CONFIG_DIR="/etc/${APP_NAME}"
+ENV_FILE="${CONFIG_DIR}/${APP_NAME}.env"
+STATE_FILE="${CONFIG_DIR}/update_state.env"
+SERVICE_NAME="${APP_NAME}.service"
+
+log_info() { echo "[INF] $*"; }
+log_ok()   { echo "[OK]  $*"; }
+log_warn() { echo "[WRN] $*" >&2; }
+
+if [[ "${EUID}" -ne 0 ]]; then
+  log_warn "Please run as root."
+  exit 1
+fi
+
+mkdir -p "${CONFIG_DIR}"
+
+get_remote_commit() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -H "Accept: application/vnd.github+json" "${API_COMMIT_URL}" 2>/dev/null \
+      | sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{40\}\)".*/\1/p' | head -n1
+  elif command -v git >/dev/null 2>&1; then
+    git ls-remote "${REPO_URL}" refs/heads/main 2>/dev/null | awk '{print $1}' | head -n1
   fi
-done
-[ -n "$SRC_DIR" ] || SRC_DIR="/opt/fastasiapanel"
+}
 
-BIN_TARGET="${BIN_TARGET:-/usr/local/bin/fastasiapanel}"
-ENV_FILE="${ENV_FILE:-/etc/fastasiapanel/fastasiapanel.env}"
-BACKUP_DIR="/var/backups/fastasiapanel/$(date +%Y%m%d_%H%M%S)"
-TARGET_REF="${1:-main}"
-
-echo "[1/5] Backing up config & database to $BACKUP_DIR ..."
-mkdir -p "$BACKUP_DIR"
-[ -f "$ENV_FILE" ] && cp -f "$ENV_FILE" "$BACKUP_DIR/fastasiapanel.env"
-[ -f "/etc/fastasiapanel/fastasiapanel.db" ] && cp -f "/etc/fastasiapanel/fastasiapanel.db" "$BACKUP_DIR/fastasiapanel.db"
-
-echo "[2/5] Fetching latest updates ($TARGET_REF) ..."
-if [ -d "$SRC_DIR/.git" ]; then
-  cd "$SRC_DIR"
-  git fetch --all --tags --prune
-  git checkout "$TARGET_REF"
-  if git show-ref --verify --quiet "refs/remotes/origin/$TARGET_REF"; then
-    git reset --hard "origin/$TARGET_REF"
+get_local_commit() {
+  if [[ -f "${STATE_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    source "${STATE_FILE}"
+    if [[ -n "${INSTALLED_COMMIT:-}" ]]; then
+      echo "${INSTALLED_COMMIT}"
+      return 0
+    fi
   fi
-else
-  git clone --branch "$TARGET_REF" "$REPO_URL" "$SRC_DIR"
-  cd "$SRC_DIR"
+  if command -v git >/dev/null 2>&1 && [[ -d ".git" ]]; then
+    git rev-parse HEAD 2>/dev/null || true
+  fi
+}
+
+REMOTE_SHA="$(get_remote_commit || true)"
+LOCAL_SHA="$(get_local_commit || true)"
+
+if [[ -n "${REMOTE_SHA}" && -n "${LOCAL_SHA}" && "${REMOTE_SHA}" == "${LOCAL_SHA}" ]]; then
+  log_ok "All up to date (${REMOTE_SHA:0:7})."
+  exit 0
 fi
 
-echo "[3/5] Running checks & building binary (preserving existing credentials/env) ..."
-go vet ./...
-go test ./...
-if [ -d "./cmd/panel" ]; then
-  go build -trimpath -o "$BIN_TARGET" ./cmd/panel
-else
-  go build -trimpath -o "$BIN_TARGET" .
-fi
-chmod +x "$BIN_TARGET"
+# حفظ تنظیمات فعلی (یوزرنیم، پسورد، پورت، base path، دیتابیس)
+BACKUP_DIR="/var/backups/${APP_NAME}/pre_update_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "${BACKUP_DIR}"
+[[ -f "${ENV_FILE}" ]] && cp -af "${ENV_FILE}" "${BACKUP_DIR}/"
+[[ -f "${CONFIG_DIR}/${APP_NAME}.db" ]] && cp -af "${CONFIG_DIR}/${APP_NAME}.db" "${BACKUP_DIR}/"
 
-echo "[4/5] Ensuring existing panel credentials & DB config stay intact ..."
-if [ -f "$BACKUP_DIR/fastasiapanel.env" ]; then
-  mkdir -p "$(dirname "$ENV_FILE")"
-  cp -f "$BACKUP_DIR/fastasiapanel.env" "$ENV_FILE"
+# اطمینان از وجود Go برای بیلد مستقیم از آخرین main
+if ! command -v go >/dev/null 2>&1; then
+  log_info "Go not found, installing golang..."
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -y >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y golang-go >/dev/null 2>&1
+  fi
 fi
 
-echo "[5/5] Restarting fastasiapanel service ..."
-if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files | grep -q "^fastasiapanel\.service"; then
-  systemctl daemon-reload
-  systemctl restart fastasiapanel
-  systemctl status fastasiapanel --no-pager || true
-elif command -v service >/dev/null 2>&1 && service --status-all 2>&1 | grep -q "fastasiapanel"; then
-  service fastasiapanel restart
-else
-  pkill -f "$BIN_TARGET" || true
-  nohup "$BIN_TARGET" >/var/log/fastasiapanel.log 2>&1 &
+SRC_DIR="$(mktemp -d)"
+trap 'rm -rf "${SRC_DIR}"' EXIT
+
+log_info "Fetching latest source from main..."
+git clone --depth 1 --branch main "${REPO_URL}" "${SRC_DIR}/repo" >/dev/null 2>&1
+
+if [[ -z "${REMOTE_SHA}" ]]; then
+  REMOTE_SHA="$(git -C "${SRC_DIR}/repo" rev-parse HEAD 2>/dev/null || true)"
 fi
 
-echo "Update completed cleanly on ref: $TARGET_REF (panel credentials preserved)."
+log_info "Building ${APP_NAME}..."
+(
+  cd "${SRC_DIR}/repo"
+  go build -o "${SRC_DIR}/${APP_NAME}" .
+)
+
+systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+install -m 755 "${SRC_DIR}/${APP_NAME}" "${INSTALL_DIR}/${APP_NAME}"
+
+if [[ -f "${SRC_DIR}/repo/scripts/fastasian.sh" ]]; then
+  install -m 755 "${SRC_DIR}/repo/scripts/fastasian.sh" "${INSTALL_DIR}/fastasian"
+fi
+
+cat <<STATEEOF > "${STATE_FILE}"
+INSTALLED_COMMIT="${REMOTE_SHA}"
+UPDATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+STATEEOF
+
+systemctl daemon-reload
+systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1 || true
+systemctl start "${SERVICE_NAME}"
+
+log_ok "Updated ${APP_NAME} to latest main (${REMOTE_SHA:0:7})."
