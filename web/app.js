@@ -1068,119 +1068,251 @@
   }
 
   function drawQR(canvas, text) {
+    if (!canvas) return;
     var ctx = canvas.getContext('2d');
     var payload = String(text || '');
-    var bytes = [];
+    if (!payload) {
+      canvas.width = 220;
+      canvas.height = 60;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#111827';
+      ctx.font = '13px sans-serif';
+      ctx.fillText('Empty QR content', 16, 34);
+      return;
+    }
+
+    // UTF-8 byte encode
+    var dataBytes = [];
     for (var i = 0; i < payload.length; i++) {
-      var code = payload.charCodeAt(i);
-      if (code < 0x80) bytes.push(code);
-      else if (code < 0x800) {
-        bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
-      } else {
-        bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+      var c = payload.charCodeAt(i);
+      if (c < 0x80) dataBytes.push(c);
+      else if (c < 0x800) dataBytes.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+      else dataBytes.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+    }
+
+    // GF(256) with primitive polynomial 0x11d
+    var exp = new Array(256), log = new Array(256);
+    var x = 1;
+    for (var i = 0; i < 255; i++) {
+      exp[i] = x;
+      log[x] = i;
+      x <<= 1;
+      if (x & 0x100) x ^= 0x11d;
+    }
+    exp[255] = exp[0];
+
+    function gfMul(a, b) {
+      if (a === 0 || b === 0) return 0;
+      return exp[(log[a] + log[b]) % 255];
+    }
+    function rsPoly(ecLen) {
+      var poly = [1];
+      for (var i = 0; i < ecLen; i++) {
+        var next = new Array(poly.length + 1).fill(0);
+        for (var j = 0; j < poly.length; j++) {
+          next[j] ^= poly[j];
+          next[j + 1] ^= gfMul(poly[j], exp[i]);
+        }
+        poly = next;
+      }
+      return poly;
+    }
+    function rsEncode(data, ecLen) {
+      var gen = rsPoly(ecLen);
+      var rem = new Array(ecLen).fill(0);
+      for (var i = 0; i < data.length; i++) {
+        var factor = data[i] ^ rem[0];
+        rem.shift();
+        rem.push(0);
+        for (var j = 0; j < ecLen; j++) {
+          rem[j] ^= gfMul(gen[j + 1], factor);
+        }
+      }
+      return data.concat(rem);
+    }
+
+    // QR capacities for ECC Level M (bytes) across versions 1..10
+    var capM = [0, 14, 26, 42, 62, 84, 106, 122, 152, 180, 213];
+    var ecPerBlockM = [0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26];
+    var blocksM = [0, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5];
+
+    var ver = 0;
+    for (var v = 1; v <= 10; v++) {
+      if (dataBytes.length <= capM[v]) { ver = v; break; }
+    }
+    if (ver === 0) ver = 10;
+
+    var countBits = ver <= 9 ? 8 : 16;
+    var totalDataCodewords = capM[ver];
+    var ecLen = ecPerBlockM[ver];
+    var numBlocks = blocksM[ver];
+
+    // Bit stream: mode 0100 (byte) + length + payload + terminator + pad
+    var bits = [];
+    function pushBits(val, len) {
+      for (var b = len - 1; b >= 0; b--) bits.push((val >> b) & 1);
+    }
+    pushBits(0x4, 4);
+    pushBits(dataBytes.length, countBits);
+    for (var i = 0; i < dataBytes.length && bits.length < totalDataCodewords * 8; i++) {
+      pushBits(dataBytes[i], 8);
+    }
+    var termLen = Math.min(4, totalDataCodewords * 8 - bits.length);
+    if (termLen > 0) pushBits(0, termLen);
+    while (bits.length % 8 !== 0) bits.push(0);
+
+    var cw = [];
+    for (var i = 0; i < bits.length; i += 8) {
+      var byteVal = 0;
+      for (var k = 0; k < 8; k++) byteVal = (byteVal << 1) | bits[i + k];
+      cw.push(byteVal);
+    }
+    var padBytes = [0xec, 0x11];
+    var pIdx = 0;
+    while (cw.length < totalDataCodewords) {
+      cw.push(padBytes[pIdx % 2]);
+      pIdx++;
+    }
+
+    // Split into blocks & interleave
+    var shortLen = Math.floor(totalDataCodewords / numBlocks);
+    var longCount = totalDataCodewords % numBlocks;
+    var dBlocks = [], eBlocks = [], offset = 0;
+    for (var b = 0; b < numBlocks; b++) {
+      var len = shortLen + (b >= numBlocks - longCount ? 1 : 0);
+      var slice = cw.slice(offset, offset + len);
+      offset += len;
+      dBlocks.push(slice);
+      eBlocks.push(rsEncode(slice, ecLen));
+    }
+    var finalCodewords = [];
+    var maxDataLen = shortLen + (longCount > 0 ? 1 : 0);
+    for (var i = 0; i < maxDataLen; i++) {
+      for (var b = 0; b < numBlocks; b++) {
+        if (i < dBlocks[b].length) finalCodewords.push(dBlocks[b][i]);
       }
     }
-    var ver = bytes.length <= 17 ? 1 : bytes.length <= 32 ? 2 : bytes.length <= 53 ? 3 : bytes.length <= 78 ? 4 : bytes.length <= 106 ? 5 : 6;
+    for (var i = 0; i < ecLen; i++) {
+      for (var b = 0; b < numBlocks; b++) {
+        finalCodewords.push(eBlocks[b][i]);
+      }
+    }
+
     var n = ver * 4 + 17;
-    var size = 224;
+    var mat = Array.from({ length: n }, function () { return new Array(n).fill(null); });
+    var fixed = Array.from({ length: n }, function () { return new Array(n).fill(false); });
+
+    function setCell(r, c, dark, isFixed) {
+      if (r < 0 || c < 0 || r >= n || c >= n) return;
+      mat[r][c] = dark;
+      if (isFixed) fixed[r][c] = true;
+    }
+
+    function addFinder(r0, c0) {
+      for (var r = -1; r <= 7; r++) {
+        for (var c = -1; c <= 7; c++) {
+          var rr = r0 + r, cc = c0 + c;
+          if (rr < 0 || cc < 0 || rr >= n || cc >= n) continue;
+          var dark = (r >= 0 && r <= 6 && (c === 0 || c === 6)) ||
+                     (c >= 0 && c <= 6 && (r === 0 || r === 6)) ||
+                     (r >= 2 && r <= 4 && c >= 2 && c <= 4);
+          setCell(rr, cc, !!dark, true);
+        }
+      }
+    }
+    addFinder(0, 0);
+    addFinder(0, n - 7);
+    addFinder(n - 7, 0);
+
+    // Timing patterns
+    for (var i = 8; i < n - 8; i++) {
+      setCell(6, i, i % 2 === 0, true);
+      setCell(i, 6, i % 2 === 0, true);
+    }
+
+    // Alignment pattern for v >= 2
+    if (ver >= 2) {
+      var alignPos = ver === 2 ? [6, 18] : ver === 3 ? [6, 22] : ver === 4 ? [6, 26] : ver === 5 ? [6, 30] : ver === 6 ? [6, 34] : [6, 22, 38];
+      for (var ri = 0; ri < alignPos.length; ri++) {
+        for (var ci = 0; ci < alignPos.length; ci++) {
+          var ar = alignPos[ri], ac = alignPos[ci];
+          if (fixed[ar][ac]) continue;
+          for (var dr = -2; dr <= 2; dr++) {
+            for (var dc = -2; dc <= 2; dc++) {
+              var mDist = Math.max(Math.abs(dr), Math.abs(dc));
+              setCell(ar + dr, ac + dc, mDist !== 1, true);
+            }
+          }
+        }
+      }
+    }
+
+    // Reserve format info cells
+    for (var i = 0; i < 9; i++) {
+      if (i < n) { fixed[8][i] = true; fixed[i][8] = true; }
+    }
+    for (var i = 0; i < 8; i++) {
+      fixed[8][n - 1 - i] = true;
+      fixed[n - 1 - i][8] = true;
+    }
+    setCell(n - 8, 8, true, true);
+
+    // Place data bits in zig-zag
+    var bitStream = [];
+    for (var i = 0; i < finalCodewords.length; i++) {
+      for (var b = 7; b >= 0; b--) bitStream.push((finalCodewords[i] >> b) & 1);
+    }
+    var bIdx = 0;
+    var upward = true;
+    for (var col = n - 1; col >= 1; col -= 2) {
+      if (col === 6) col = 5;
+      for (var step = 0; step < n; step++) {
+        var row = upward ? (n - 1 - step) : step;
+        for (var dc = 0; dc < 2; dc++) {
+          var c = col - dc;
+          if (!fixed[row][c]) {
+            var dBit = bIdx < bitStream.length ? bitStream[bIdx++] : 0;
+            mat[row][c] = dBit === 1;
+          }
+        }
+      }
+      upward = !upward;
+    }
+
+    // Mask 0: (r + c) % 2 === 0
+    for (var r = 0; r < n; r++) {
+      for (var c = 0; c < n; c++) {
+        if (!fixed[r][c] && ((r + c) % 2 === 0)) {
+          mat[r][c] = !mat[r][c];
+        }
+      }
+    }
+
+    // Format info for ECC M (00) + Mask 0 (000) -> BCH(15,5) = 0x5412
+    var fmt = 0x5412;
+    for (var i = 0; i < 15; i++) {
+      var dark = ((fmt >> (14 - i)) & 1) === 1;
+      if (i < 6) setCell(i, 8, dark, true);
+      else if (i < 8) setCell(i + 1, 8, dark, true);
+      else setCell(n - 15 + i, 8, dark, true);
+
+      if (i < 8) setCell(8, n - 1 - i, dark, true);
+      else if (i === 8) setCell(8, 7, dark, true);
+      else setCell(8, 14 - i, dark, true);
+    }
+
     var quiet = 4;
-    var cell = Math.max(2, Math.floor(size / (n + quiet * 2)));
-    canvas.width = n * cell + quiet * cell * 2;
+    var cellPx = 6;
+    canvas.width = (n + quiet * 2) * cellPx;
     canvas.height = canvas.width;
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    var grid = Array.from({ length: n }, function () { return Array(n).fill(null); });
-    var isFunc = Array.from({ length: n }, function () { return Array(n).fill(false); });
-
-    function setMod(x, y, val, func) {
-      if (x < 0 || y < 0 || x >= n || y >= n) return;
-      grid[y][x] = !!val;
-      if (func) isFunc[y][x] = true;
-    }
-    function finder(cx, cy) {
-      for (var dy = -4; dy <= 4; dy++) {
-        for (var dx = -4; dx <= 4; dx++) {
-          var ax = Math.max(dx, -dx), ay = Math.max(dy, -dy);
-          var m = Math.max(ax, ay);
-          if (m <= 4) {
-            var dark = (m <= 1) || (m === 3);
-            setMod(cx + dx, cy + dy, dark, true);
-          }
-        }
-      }
-    }
-    finder(3, 3);
-    finder(n - 4, 3);
-    finder(3, n - 4);
-    for (var i = 8; i < n - 8; i++) {
-      setMod(i, 6, i % 2 === 0, true);
-      setMod(6, i, i % 2 === 0, true);
-    }
-    if (ver >= 2) {
-      var ap = n - 7;
-      for (var dy = -2; dy <= 2; dy++) {
-        for (var dx = -2; dx <= 2; dx++) {
-          var d = Math.max(Math.abs(dx), Math.abs(dy)) !== 1;
-          setMod(ap + dx, ap + dy, d, true);
-        }
-      }
-    }
-    setMod(8, n - 8, true, true);
-
-    var bits = [0, 1, 0, 0];
-    var lenBits = ver <= 9 ? 8 : 16;
-    var lenVal = Math.min(bytes.length, (1 << lenBits) - 1);
-    for (var b = lenBits - 1; b >= 0; b--) bits.push((lenVal >> b) & 1);
-    for (var i = 0; i < bytes.length; i++) {
-      for (var b = 7; b >= 0; b--) bits.push((bytes[i] >> b) & 1);
-    }
-    var capBits = ver === 1 ? 152 : ver === 2 ? 272 : ver === 3 ? 440 : ver === 4 ? 640 : ver === 5 ? 864 : 1088;
-    for (var p = 0; p < 4 && bits.length < capBits; p++) bits.push(0);
-    while (bits.length % 8 !== 0) bits.push(0);
-    var pads = [0xec, 0x11];
-    var pi = 0;
-    while (bits.length < capBits) {
-      var pv = pads[pi++ % 2];
-      for (var b = 7; b >= 0 && bits.length < capBits; b--) bits.push((pv >> b) & 1);
-    }
-
-    var bitIdx = 0;
-    var up = true;
-    for (var x = n - 1; x > 0; x -= 2) {
-      if (x === 6) x = 5;
-      for (var step = 0; step < n; step++) {
-        var y = up ? (n - 1 - step) : step;
-        for (var c = 0; c < 2; c++) {
-          var xx = x - c;
-          if (!isFunc[y][xx]) {
-            var bit = bitIdx < bits.length ? bits[bitIdx++] : 0;
-            var masked = ((x + y) % 2 === 0) ? (bit ^ 1) : bit;
-            setMod(xx, y, masked === 1, false);
-          }
-        }
-      }
-      up = !up;
-    }
-
-    // Format info (EC level L = 01, mask 0 = 000) -> 0x77c0
-    var fmt = 0x77c0;
-    for (var i = 0; i < 15; i++) {
-      var fbit = ((fmt >> (14 - i)) & 1) === 1;
-      if (i < 6) setMod(8, i, fbit, true);
-      else if (i < 8) setMod(8, i + 1, fbit, true);
-      else if (i === 8) setMod(7, 8, fbit, true);
-      else setMod(14 - i, 8, fbit, true);
-
-      if (i < 8) setMod(n - 1 - i, 8, fbit, true);
-      else setMod(8, n - 15 + i, fbit, true);
-    }
-
-    ctx.fillStyle = '#0f172a';
-    for (var y = 0; y < n; y++) {
-      for (var x = 0; x < n; x++) {
-        if (grid[y][x]) {
-          ctx.fillRect((x + quiet) * cell, (y + quiet) * cell, cell, cell);
+    ctx.fillStyle = '#000000';
+    for (var r = 0; r < n; r++) {
+      for (var c = 0; c < n; c++) {
+        if (mat[r][c]) {
+          ctx.fillRect((c + quiet) * cellPx, (r + quiet) * cellPx, cellPx, cellPx);
         }
       }
     }

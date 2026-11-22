@@ -298,6 +298,197 @@ func (a *App) Handler() http.Handler {
 	return a.secure(mux)
 }
 
+func isBrowserSubRequest(r *http.Request) bool {
+	if r.URL.Query().Get("raw") == "1" || r.URL.Query().Get("format") != "" {
+		return false
+	}
+	ua := strings.ToLower(r.Header.Get("User-Agent"))
+	clientHints := []string{
+		"v2ray", "xray", "clash", "mihomo", "sing-box", "singbox",
+		"shadowrocket", "surge", "loon", "quantumult", "nekobox",
+		"nekoray", "hiddify", "streisand", "stash", "curl", "wget", "okhttp", "go-http-client",
+	}
+	for _, h := range clientHints {
+		if strings.Contains(ua, h) {
+			return false
+		}
+	}
+	accept := strings.ToLower(r.Header.Get("Accept"))
+	return strings.Contains(accept, "text/html")
+}
+
+func fmtBytesFA(b int64) string {
+	if b < 0 {
+		b = 0
+	}
+	const kb = 1024.0
+	const mb = kb * 1024.0
+	const gb = mb * 1024.0
+	f := float64(b)
+	switch {
+	case f >= gb:
+		return fmt.Sprintf("%.2f GB", f/gb)
+	case f >= mb:
+		return fmt.Sprintf("%.2f MB", f/mb)
+	case f >= kb:
+		return fmt.Sprintf("%.1f KB", f/kb)
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
+}
+
+func escHTML(s string) string {
+	return strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		"\"", "&quot;",
+		"'", "&#39;",
+	).Replace(s)
+}
+
+func renderSubStatusPage(subID, title string, up, down, total, expireSec int64, rawContent, subURL string) string {
+	used := up + down
+	rem := total - used
+	if rem < 0 {
+		rem = 0
+	}
+	pct := 0
+	if total > 0 {
+		pct = int((used * 100) / total)
+		if pct > 100 {
+			pct = 100
+		}
+	}
+	status := "فعال"
+	badgeColor := "#86efac"
+	badgeBg := "rgba(34,197,94,.16)"
+	badgeBorder := "rgba(34,197,94,.35)"
+	if total > 0 && used >= total {
+		status = "اتمام حجم"
+		badgeColor = "#fca5a5"
+		badgeBg = "rgba(239,68,68,.16)"
+		badgeBorder = "rgba(239,68,68,.35)"
+	}
+	expStr := "نامحدود"
+	if expireSec > 0 {
+		expStr = fmt.Sprintf("TS: %d", expireSec)
+	}
+	totStr := "نامحدود"
+	remStr := "نامحدود"
+	if total > 0 {
+		totStr = fmtBytesFA(total)
+		remStr = fmtBytesFA(rem)
+	}
+	heading := escHTML(title)
+	if heading == "" {
+		heading = "وضعیت اشتراک"
+	}
+	var b strings.Builder
+	b.WriteString(`<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>`)
+	b.WriteString(heading)
+	b.WriteString(`</title>
+<style>
+  :root{--bg:#090d1a;--card:#11182c;--line:rgba(255,255,255,.1);--txt:#f8fafc;--mut:#94a3b8;--g1:#38bdf8;--g2:#22c55e}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:radial-gradient(circle at 50% 0%,#1e293b,var(--bg) 65%);color:var(--txt);font-family:tahoma,system-ui,-apple-system,sans-serif}
+  .card{width:100%;max-width:560px;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:24px;box-shadow:0 24px 64px rgba(0,0,0,.5)}
+  .head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+  .head h1{margin:0;font-size:18px;font-weight:700}
+  .badge{padding:6px 12px;border-radius:999px;font-size:12px;font-weight:700;color:`)
+	b.WriteString(badgeColor)
+	b.WriteString(`;background:`)
+	b.WriteString(badgeBg)
+	b.WriteString(`;border:1px solid `)
+	b.WriteString(badgeBorder)
+	b.WriteString(`}
+  .usage-row{display:flex;justify-content:space-between;font-size:13px;color:var(--mut);margin-bottom:8px}
+  .usage-row strong{color:var(--txt)}
+  .bar{height:10px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden;margin-bottom:20px}
+  .bar>span{display:block;height:100%;width:`)
+	fmt.Fprintf(&b, "%d%%", pct)
+	b.WriteString(`;background:linear-gradient(90deg,var(--g1),var(--g2))}
+  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:18px}
+  .item{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:14px;padding:14px}
+  .item small{display:block;color:var(--mut);font-size:12px;margin-bottom:6px}
+  .item strong{font-size:15px}
+  .urlbox{direction:ltr;text-align:left;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:12px;padding:12px;font-size:12px;word-break:break-all;color:#bae6fd;margin-bottom:14px}
+  .btns{display:flex;gap:10px;flex-wrap:wrap}
+  button,a.btn{border:0;border-radius:12px;padding:11px 16px;font-family:inherit;font-size:13px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+  .primary{flex:1;background:var(--g2);color:#052e16;font-weight:700}
+  .sec{background:rgba(255,255,255,.08);color:var(--txt);border:1px solid var(--line)}
+  pre{margin:16px 0 0;padding:12px;border-radius:12px;background:rgba(0,0,0,.3);border:1px solid var(--line);font-size:11px;direction:ltr;text-align:left;white-space:pre-wrap;word-break:break-all;max-height:170px;overflow:auto;color:#cbd5e1}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="head">
+      <h1>`)
+	b.WriteString(heading)
+	b.WriteString(`</h1>
+      <span class="badge">`)
+	b.WriteString(escHTML(status))
+	b.WriteString(`</span>
+    </div>
+    <div class="usage-row">
+      <span>مصرف کل: <strong>`)
+	b.WriteString(escHTML(fmtBytesFA(used)))
+	b.WriteString(`</strong></span>
+      <span>سقف حجم: <strong>`)
+	b.WriteString(escHTML(totStr))
+	b.WriteString(`</strong></span>
+    </div>
+    <div class="bar"><span style="width:`)
+	fmt.Fprintf(&b, "%d%%", pct)
+	b.WriteString(`"></span></div>
+    <div class="grid">
+      <div class="item"><small>حجم باقیمانده</small><strong>`)
+	b.WriteString(escHTML(remStr))
+	b.WriteString(`</strong></div>
+      <div class="item"><small>انقضا</small><strong>`)
+	b.WriteString(escHTML(expStr))
+	b.WriteString(`</strong></div>
+      <div class="item"><small>آپلود / دانلود</small><strong>`)
+	b.WriteString(escHTML(fmtBytesFA(up)))
+	b.WriteString(` / `)
+	b.WriteString(escHTML(fmtBytesFA(down)))
+	b.WriteString(`</strong></div>
+      <div class="item"><small>کد اشتراک</small><strong style="direction:ltr">`)
+	b.WriteString(escHTML(subID))
+	b.WriteString(`</strong></div>
+    </div>
+    <div class="urlbox" id="subUrlText">`)
+	b.WriteString(escHTML(subURL))
+	b.WriteString(`</div>
+    <div class="btns">
+      <button type="button" class="primary" id="copySubBtn">کپی لینک اشتراک</button>
+      <a class="btn sec" href="?raw=1">خروجی خام اشتراک</a>
+    </div>
+    <pre>`)
+	b.WriteString(escHTML(rawContent))
+	b.WriteString(`</pre>
+  </div>
+  <script>
+    document.getElementById("copySubBtn").addEventListener("click", function () {
+      var txt = document.getElementById("subUrlText").textContent.trim();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).catch(function(){});
+      }
+      var btn = this;
+      btn.textContent = "کپی شد!";
+      setTimeout(function () { btn.textContent = "کپی لینک اشتراک"; }, 1500);
+    });
+  </script>
+</body>
+</html>`)
+	return b.String()
+}
+
 func (a *App) subscription(w http.ResponseWriter, r *http.Request) {
 	subID := strings.TrimSpace(r.PathValue("subId"))
 	if subID == "" {
@@ -310,15 +501,29 @@ func (a *App) subscription(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Profile-Update-Interval", "12")
 	if res.Title != "" {
 		w.Header().Set("Profile-Title", "base64:"+encodeB64(res.Title))
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, url.PathEscape(res.Title)))
 	}
 	userInfo := fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", res.Upload, res.Download, res.Total, res.ExpireSec)
 	w.Header().Set("Subscription-Userinfo", userInfo)
+
+	if isBrowserSubRequest(r) {
+		scheme := "http"
+		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			scheme = "https"
+		}
+		subURL := fmt.Sprintf("%s://%s%s", scheme, r.Host, r.URL.Path)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(renderSubStatusPage(subID, res.Title, res.Upload, res.Download, res.Total, res.ExpireSec, res.Content, subURL)))
+		return
+	}
+
+	if res.Title != "" {
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, url.PathEscape(res.Title)))
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte(res.Content))
 }
 
