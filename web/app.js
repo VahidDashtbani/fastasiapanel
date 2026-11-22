@@ -2099,14 +2099,57 @@ function fapOpenInboundJsonModal(mode, initialJson) {
 function fapExportInboundsJSON() {
   var inbounds = (typeof state !== 'undefined' && Array.isArray(state.inbounds)) ? state.inbounds : [];
   return JSON.stringify({
-    version: '1.1.1',
+    version: '1.1.3',
     exported_at: new Date().toISOString(),
     inbounds: inbounds
   }, null, 2);
 }
 
+async function fapCallAPI(method, path, body) {
+  if (typeof api === 'function') {
+    return await api(method, path, body);
+  }
+  if (window && typeof window.api === 'function') {
+    return await window.api(method, path, body);
+  }
+  if (window && typeof window.fapAPI === 'function') {
+    return await window.fapAPI(method, path, body);
+  }
+
+  var pathname = window.location.pathname || '/';
+  // Support both /<base>/... and /<base>/api/... paths cleanly
+  var base = pathname.replace(/\/+$|\/(?:inbounds|clients|settings|logs|sub)(?:\/.*)?$/i, '');
+  var cleanPath = String(path || '').replace(/^\/+/, '');
+  if (!/^api\//i.test(cleanPath)) {
+    cleanPath = 'api/' + cleanPath;
+  }
+  var url = (base || '') + '/' + cleanPath;
+
+  var opts = {
+    method: method,
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' }
+  };
+  if (body !== undefined && body !== null) {
+    opts.body = typeof body === 'string' ? body : JSON.stringify(body);
+  }
+
+  var res = await fetch(url, opts);
+  var txt = await res.text();
+  var data = null;
+  try {
+    data = txt ? JSON.parse(txt) : null;
+  } catch (_) {
+    data = txt;
+  }
+  if (!res.ok) {
+    var msg = (data && (data.error || data.message)) || ('HTTP ' + res.status);
+    throw new Error(msg);
+  }
+  return data;
+}
+
 async function fapImportInboundsJSON(raw) {
-  if (typeof api !== 'function') throw new Error('API client not ready');
   var parsed = JSON.parse(raw);
   var items = Array.isArray(parsed)
     ? parsed
@@ -2121,13 +2164,16 @@ async function fapImportInboundsJSON(raw) {
     var ib = JSON.parse(JSON.stringify(items[i] || {}));
     var clients = Array.isArray(ib.clients) ? ib.clients : (Array.isArray(ib.users) ? ib.users : []);
     delete ib.id;
+    delete ib.tag;
     delete ib.clients;
     delete ib.users;
     delete ib.up;
     delete ib.down;
+    delete ib.live_up;
+    delete ib.live_down;
 
-    var res = await api('POST', 'inbounds', ib);
-    var inboundId = res && (res.id || (res.inbound && res.inbound.id));
+    var res = await fapCallAPI('POST', 'inbounds', ib);
+    var inboundId = res && (res.id || (res.inbound && res.inbound.id) || (res.data && res.data.id));
     ibCount++;
 
     if (inboundId && clients.length) {
@@ -2136,15 +2182,26 @@ async function fapImportInboundsJSON(raw) {
         delete cl.id;
         delete cl.up;
         delete cl.down;
-        if (!cl.uuid) cl.uuid = fapGenUUIDv4();
+        delete cl.live_up;
+        delete cl.live_down;
+        delete cl.online;
+        delete cl.link;
+        delete cl.sub_url;
+        if (!cl.uuid && typeof fapGenUUIDv4 === 'function') {
+          cl.uuid = fapGenUUIDv4();
+        }
         cl.inbound_id = inboundId;
-        await api('POST', 'clients', cl);
+        await fapCallAPI('POST', 'clients', cl);
         clCount++;
       }
     }
   }
 
-  if (typeof loadAll === 'function') await loadAll();
+  if (typeof loadAll === 'function') {
+    await loadAll();
+  } else if (window && typeof window.loadAll === 'function') {
+    await window.loadAll();
+  }
   return 'Imported ' + ibCount + ' inbound(s) and ' + clCount + ' client(s).';
 }
 
