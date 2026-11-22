@@ -298,12 +298,15 @@
     rows.forEach(function (item) {
       var ib = item.ib;
       var c = item.c;
-      var used = (c.up || 0) + (c.down || 0);
+      var upVal = c.up || 0;
+      var downVal = c.down || 0;
+      var used = upVal + downVal;
       var pct = c.total_bytes > 0 ? Math.min(100, Math.round(used * 100 / c.total_bytes)) : 0;
       var barCls = pct >= 100 ? 'full' : pct >= 85 ? 'high' : '';
-      var usage = c.total_bytes > 0
-        ? '<span class="bar ' + barCls + '"><i data-pct="' + pct + '"></i></span><span class="num">' + fmtBytes(used) + ' / ' + fmtBytes(c.total_bytes) + '</span>'
-        : '<span class="num">' + fmtBytes(used) + '</span> <span class="tag soft">Unlimited</span>';
+      var liveSub = '<div class="sub num" data-cl-ud="' + esc(c.id || c.email || '') + '">&uarr; ' + fmtBytes(upVal) + ' &middot; &darr; ' + fmtBytes(downVal) + '</div>';
+      var usage = (c.total_bytes > 0
+        ? '<span class="bar ' + barCls + '"><i data-pct="' + pct + '"></i></span><span class="num" data-cl-total="' + esc(c.id || c.email || '') + '">' + fmtBytes(used) + ' / ' + fmtBytes(c.total_bytes) + '</span>'
+        : '<span class="num" data-cl-total="' + esc(c.id || c.email || '') + '">' + fmtBytes(used) + '</span> <span class="tag soft">Unlimited</span>') + liveSub;
       var ex = expiryInfo(c);
       var limits = [];
       if (c.limit_ip > 0) limits.push('IP: ' + c.limit_ip);
@@ -359,6 +362,34 @@
       });
 
       renderClientsTable(keepScroll);
+      if (window.__fapClientLiveTimer) clearInterval(window.__fapClientLiveTimer);
+      window.__fapClientLiveTimer = setInterval(function () {
+        if (document.hidden || state.page !== 'clients') return;
+        api('GET', 'inbounds').then(function (latest) {
+          if (!Array.isArray(latest) || state.page !== 'clients') return;
+          state.inbounds = latest;
+          var map = {};
+          latest.forEach(function (ib) {
+            (ib.clients || []).forEach(function (cl) {
+              if (cl.id) map[String(cl.id)] = cl;
+              if (cl.email) map[String(cl.email)] = cl;
+            });
+          });
+          document.querySelectorAll('[data-cl-ud]').forEach(function (el) {
+            var key = el.getAttribute('data-cl-ud');
+            var cl = map[key];
+            if (!cl) return;
+            var u = cl.up || 0;
+            var d = cl.down || 0;
+            el.innerHTML = '&uarr; ' + fmtBytes(u) + ' &middot; &darr; ' + fmtBytes(d);
+            var totEl = document.querySelector('[data-cl-total="' + CSS.escape(key) + '"]');
+            if (totEl) {
+              var sum = u + d;
+              totEl.textContent = cl.total_bytes > 0 ? (fmtBytes(sum) + ' / ' + fmtBytes(cl.total_bytes)) : fmtBytes(sum);
+            }
+          });
+        }).catch(function () {});
+      }, 1000);
     }).catch(fail);
   }
 
