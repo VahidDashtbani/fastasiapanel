@@ -366,16 +366,46 @@ change_panel_port() {
 }
 
 update_panel() {
-  if ! confirm "Update FastAsiaPanel from GitHub (existing data and config are kept)?" "y"; then
+  if ! confirm "Update FastAsiaPanel from GitHub (existing data, username, password, and config are kept)?" "y"; then
     LOGW "Update cancelled."
     return 0
   fi
-  LOGI "Downloading latest installer and updating FastAsiaPanel..."
+
+  load_env
+  local backup_tmp="/tmp/fastasia-env-bak.$$"
+  mkdir -p "${backup_tmp}"
+  for f in "${CONF_DIR}/fastasiapanel.env" "${CONF_DIR}/panel.env" "${CONF_DIR}/install-result.env" "${CONF_DIR}/fastasiapanel.db"; do
+    [[ -f "$f" ]] && cp -f "$f" "${backup_tmp}/$(basename "$f")"
+  done
+
+  export ADMIN_USER="${ADMIN_USER:-${FAP_ADMIN_USER:-}}"
+  export ADMIN_PASS="${ADMIN_PASS:-${FAP_ADMIN_PASSWORD:-${FAP_ADMIN_PASS:-}}}"
+  export FAP_ADMIN_USER="${FAP_ADMIN_USER:-${ADMIN_USER:-}}"
+  export FAP_ADMIN_PASSWORD="${FAP_ADMIN_PASSWORD:-${ADMIN_PASS:-}}"
+  export PANEL_PORT="${PANEL_PORT:-${FAP_PORT:-}}"
+  export FAP_PORT="${FAP_PORT:-${PANEL_PORT:-}}"
+  export WEB_BASE_PATH="${WEB_BASE_PATH:-${FAP_BASE_PATH:-}}"
+  export FAP_BASE_PATH="${FAP_BASE_PATH:-${WEB_BASE_PATH:-}}"
+  export DB_TYPE="${DB_TYPE:-${FAP_DB_TYPE:-${FAP_DB:-}}}"
+  export FAP_DB_TYPE="${FAP_DB_TYPE:-${DB_TYPE:-}}"
+  export DB_DSN="${DB_DSN:-${FAP_DB_DSN:-${FAP_PG_DSN:-}}}"
+  export FAP_DB_DSN="${FAP_DB_DSN:-${DB_DSN:-}}"
+
+  LOGI "Downloading latest installer and updating FastAsiaPanel while preserving credentials..."
   local tmp_ins="/tmp/fastasia-install.$$.sh"
   curl -fsSL "${INSTALL_URL}?v=$(date +%s)" -o "${tmp_ins}"
   NON_INTERACTIVE=1 bash "${tmp_ins}"
   rm -f "${tmp_ins}"
+
+  for f in fastasiapanel.env panel.env install-result.env; do
+    if [[ -f "${backup_tmp}/$f" ]]; then
+      cp -f "${backup_tmp}/$f" "${CONF_DIR}/$f"
+    fi
+  done
+  rm -rf "${backup_tmp}"
+
   systemctl restart "${SERVICE_NAME}" || true
+  LOGI "FastAsiaPanel updated with existing admin credentials preserved."
 }
 
 update_cli_script() {
