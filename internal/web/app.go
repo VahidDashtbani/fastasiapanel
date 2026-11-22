@@ -1,6 +1,7 @@
 package web
 
 import (
+	"github.com/skip2/go-qrcode"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -525,6 +526,30 @@ func (a *App) subscription(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte(res.Content))
+}
+
+func (a *App) apiQR(w http.ResponseWriter, r *http.Request) {
+	data := strings.TrimSpace(r.URL.Query().Get("data"))
+	if data == "" {
+		http.Error(w, "missing data", http.StatusBadRequest)
+		return
+	}
+	if len(data) > 2048 {
+		http.Error(w, "data too long", http.StatusBadRequest)
+		return
+	}
+	// Render standard QR via qrcode package if imported; fallback cleanly if not present
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store")
+	if pngBytes, err := encodeStandardQRPNG(data); err == nil {
+		_, _ = w.Write(pngBytes)
+		return
+	}
+	http.Error(w, "qr encoder unavailable", http.StatusNotImplemented)
+}
+
+func encodeStandardQRPNG(data string) ([]byte, error) {
+	return qrcode.Encode(data, qrcode.Medium, 256)
 }
 
 func encodeB64(s string) string {
