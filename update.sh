@@ -5,6 +5,7 @@ REPO_OWNER_SLASH="VahidDashtbani/fastasiapanel"
 REPO_URL="https://github.com/${REPO_OWNER_SLASH}.git"
 API_COMMIT_URL="https://api.github.com/repos/${REPO_OWNER_SLASH}/commits/main"
 API_LATEST_REL="https://api.github.com/repos/${REPO_OWNER_SLASH}/releases/latest"
+API_TAG_V116="https://api.github.com/repos/${REPO_OWNER_SLASH}/releases/tags/v1.1.6"
 
 APP_NAME="fastasiapanel"
 INSTALL_DIR="/usr/local/bin"
@@ -24,7 +25,7 @@ fi
 
 mkdir -p "${CONFIG_DIR}"
 
-# ۱. حفظ تنظیمات دیتابیس فعلی (خصوصاً PostgreSQL)
+# ۱. حفظ تنظیمات دیتابیس، پورت، base path و کلیدهای پنل
 PREV_DB_TYPE=""
 PREV_DB_DSN=""
 
@@ -47,33 +48,12 @@ elif [[ -z "${PREV_DB_TYPE}" ]] && command -v psql >/dev/null 2>&1 && runuser -u
   PREV_DB_TYPE="postgres"
 fi
 
-REMOTE_SHA="$(curl -fsSL -H "Accept: application/vnd.github+json" "${API_COMMIT_URL}" 2>/dev/null \
-  | sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{40\}\)".*/\1/p' | head -n1 || true)"
-
-REL_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" "${API_LATEST_REL}" 2>/dev/null || true)"
-REL_TAG="$(printf '%s' "${REL_JSON}" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1 || true)"
-
-LOCAL_SHA=""
-LOCAL_TAG=""
-if [[ -f "${STATE_FILE}" ]]; then
-  # shellcheck disable=SC1090
-  source "${STATE_FILE}"
-  LOCAL_SHA="${INSTALLED_COMMIT:-}"
-  LOCAL_TAG="${INSTALLED_TAG:-}"
-fi
-
-# اگر هم SHA آخرین کامیت و هم Tag ریلیز دقیقاً مثل قبل باشند، All up to date بزن
-if [[ -n "${REMOTE_SHA}" && -n "${LOCAL_SHA}" && "${REMOTE_SHA}" == "${LOCAL_SHA}" ]]; then
-  if [[ -z "${REL_TAG}" || "${REL_TAG}" == "${LOCAL_TAG}" ]]; then
-    log_ok "All up to date (${REL_TAG:-${REMOTE_SHA:0:7}})."
-    exit 0
-  fi
-fi
-
+# ۲. بکاپ امن قبل از جایگزینی باینری
 BACKUP_DIR="/var/backups/${APP_NAME}/pre_update_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "${BACKUP_DIR}"
 [[ -f "${ENV_FILE}" ]] && cp -af "${ENV_FILE}" "${BACKUP_DIR}/"
 [[ -f "${CONFIG_DIR}/${APP_NAME}.db" ]] && cp -af "${CONFIG_DIR}/${APP_NAME}.db" "${BACKUP_DIR}/"
+[[ -f "${INSTALL_DIR}/${APP_NAME}" ]] && cp -af "${INSTALL_DIR}/${APP_NAME}" "${BACKUP_DIR}/${APP_NAME}.bin.bak"
 
 ARCH_RAW="$(uname -m)"
 case "${ARCH_RAW}" in
@@ -85,55 +65,55 @@ esac
 SRC_DIR="$(mktemp -d)"
 trap 'rm -rf "${SRC_DIR}"' EXIT
 
-INSTALLED_OK=0
+# ۳. دریافت اطلاعات ریلیز و آخرین کامیت main
+REL_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" "${API_LATEST_REL}" 2>/dev/null || true)"
+if [[ -z "${REL_JSON}" ]]; then
+  REL_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" "${API_TAG_V116}" 2>/dev/null || true)"
+fi
+REL_TAG="$(printf '%s' "${REL_JSON}" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1 || true)"
+REMOTE_SHA="$(curl -fsSL -H "Accept: application/vnd.github+json" "${API_COMMIT_URL}" 2>/dev/null \
+  | sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{40\}\)".*/\1/p' | head -n1 || true)"
 
-# ۲. کشف خودکار asset های باینری/آرشیو از ریلیز گیت‌هاب
+# ۴. جمع‌آوری URL های دانلود باینری آماده برای معماری سرور
 ASSET_URLS=()
 if [[ -n "${REL_JSON}" ]]; then
   while IFS= read -r u; do
     [[ -n "$u" ]] && ASSET_URLS+=("$u")
   done < <(printf '%s' "${REL_JSON}" \
     | grep -oE 'https://github\.com/[^"]+/releases/download/[^"]+' \
-    | grep -iE "(linux.*(${ARCH}|x86_64|aarch64)|${APP_NAME}-${ARCH}|${APP_NAME}-linux)" \
+    | grep -i "linux-${ARCH}\.tar\.gz" \
     | sort -u || true)
 fi
 
 if [[ -n "${REL_TAG}" ]]; then
-  ASSET_URLS+=(
-    "https://github.com/${REPO_OWNER_SLASH}/releases/download/${REL_TAG}/${APP_NAME}-linux-${ARCH}.tar.gz"
-    "https://github.com/${REPO_OWNER_SLASH}/releases/download/${REL_TAG}/${APP_NAME}-linux-${ARCH}"
-  )
+  ASSET_URLS+=("https://github.com/${REPO_OWNER_SLASH}/releases/download/${REL_TAG}/${APP_NAME}-linux-${ARCH}.tar.gz")
 fi
 ASSET_URLS+=(
+  "https://github.com/${REPO_OWNER_SLASH}/releases/download/v1.1.6/${APP_NAME}-linux-${ARCH}.tar.gz"
   "https://github.com/${REPO_OWNER_SLASH}/releases/latest/download/${APP_NAME}-linux-${ARCH}.tar.gz"
-  "https://github.com/${REPO_OWNER_SLASH}/releases/latest/download/${APP_NAME}-linux-${ARCH}"
 )
 
+INSTALLED_OK=0
 for url in "${ASSET_URLS[@]}"; do
-  log_info "Trying release binary: ${url}"
-  if [[ "${url}" == *.tar.gz ]]; then
-    if curl -fsSL "${url}" -o "${SRC_DIR}/rel.tar.gz" 2>/dev/null && tar -xzf "${SRC_DIR}/rel.tar.gz" -C "${SRC_DIR}" 2>/dev/null; then
-      found_bin="$(find "${SRC_DIR}" -maxdepth 3 -type f -name "${APP_NAME}" | head -n1 || true)"
-      if [[ -n "${found_bin}" && -s "${found_bin}" ]]; then
-        cp -f "${found_bin}" "${SRC_DIR}/${APP_NAME}"
-        INSTALLED_OK=1
-        break
-      fi
-    fi
-  else
-    if curl -fsSL "${url}" -o "${SRC_DIR}/${APP_NAME}" 2>/dev/null && [[ -s "${SRC_DIR}/${APP_NAME}" ]]; then
+  log_info "Downloading release package: ${url}"
+  rm -rf "${SRC_DIR}/unpack" && mkdir -p "${SRC_DIR}/unpack"
+  if curl -fsSL "${url}" -o "${SRC_DIR}/release.tar.gz" 2>/dev/null \
+     && tar -xzf "${SRC_DIR}/release.tar.gz" -C "${SRC_DIR}/unpack" 2>/dev/null; then
+    found_bin="$(find "${SRC_DIR}/unpack" -type f -name "${APP_NAME}" | head -n1 || true)"
+    if [[ -n "${found_bin}" && -s "${found_bin}" ]]; then
+      cp -f "${found_bin}" "${SRC_DIR}/${APP_NAME}"
       INSTALLED_OK=1
       break
     fi
   fi
 done
 
-# ۳. فالبک به بیلد از سورس فقط اگر باینری آماده در Release نبود
+# ۵. فالبک به بیلد سورس فقط اگر دانلود بسته آماده ممکن نشد
 if [[ "${INSTALLED_OK}" -ne 1 ]]; then
-  log_warn "No prebuilt binary found in GitHub Release; trying source build..."
+  log_warn "Release package download failed; trying local Go source build..."
   if command -v go >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
     if git clone --depth 1 --branch main "${REPO_URL}" "${SRC_DIR}/repo" >/dev/null 2>&1; then
-      if (cd "${SRC_DIR}/repo" && GOTOOLCHAIN=local go build --buildvcs=false -o "${SRC_DIR}/${APP_NAME}" . 2>/dev/null); then
+      if (cd "${SRC_DIR}/repo" && GOTOOLCHAIN=local go build --buildvcs=false -o "${SRC_DIR}/${APP_NAME}" ./cmd/panel 2>/dev/null); then
         INSTALLED_OK=1
       fi
     fi
@@ -141,16 +121,16 @@ if [[ "${INSTALLED_OK}" -ne 1 ]]; then
 fi
 
 if [[ "${INSTALLED_OK}" -ne 1 || ! -s "${SRC_DIR}/${APP_NAME}" ]]; then
-  log_warn "Update failed: no release binary available and local Go version could not build."
-  log_warn "Please attach fastasiapanel-linux-${ARCH}.tar.gz to the GitHub Release (${REL_TAG:-latest})."
+  log_warn "Update failed: could not download or build ${APP_NAME}."
   exit 1
 fi
 
-# ۴. توقف سرویس، جایگزینی باینری و اسکریپت CLI، حفظ DB و استارت مجدد
+# ۶. توقف سرویس، نصب باینری جدید، آپدیت CLI و حفظ دیتابیس
 systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
 install -m 755 "${SRC_DIR}/${APP_NAME}" "${INSTALL_DIR}/${APP_NAME}"
 
-curl -fsSL "https://raw.githubusercontent.com/${REPO_OWNER_SLASH}/main/scripts/fastasian.sh?v=$(date +%s)" -o "${INSTALL_DIR}/fastasian" 2>/dev/null && chmod 755 "${INSTALL_DIR}/fastasian" || true
+curl -fsSL "https://raw.githubusercontent.com/${REPO_OWNER_SLASH}/main/scripts/fastasian.sh?v=$(date +%s)" \
+  -o "${INSTALL_DIR}/fastasian" 2>/dev/null && chmod 755 "${INSTALL_DIR}/fastasian" || true
 
 if [[ -n "${PREV_DB_TYPE}" ]]; then
   mkdir -p "${CONFIG_DIR}"
@@ -180,7 +160,7 @@ fi
 
 cat <<STATEEOF > "${STATE_FILE}"
 INSTALLED_COMMIT="${REMOTE_SHA}"
-INSTALLED_TAG="${REL_TAG}"
+INSTALLED_TAG="${REL_TAG:-v1.1.6}"
 UPDATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 STATEEOF
 
@@ -188,4 +168,4 @@ systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1 || true
 systemctl start "${SERVICE_NAME}"
 
-log_ok "FastAsiaPanel updated to ${REL_TAG:-latest} (${REMOTE_SHA:0:7})."
+log_ok "FastAsiaPanel updated to ${REL_TAG:-v1.1.6} (${REMOTE_SHA:0:7})."
