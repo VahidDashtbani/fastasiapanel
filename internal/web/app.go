@@ -228,6 +228,15 @@ func (a *App) Handler() http.Handler {
 
 
 	mux.HandleFunc("GET "+b+"/{$}", a.index)
+	mux.HandleFunc("GET "+b+"/dashboard", a.index)
+	mux.HandleFunc("GET "+b+"/inbounds", a.index)
+	mux.HandleFunc("GET "+b+"/clients", a.index)
+	mux.HandleFunc("GET "+b+"/outbounds", a.index)
+	mux.HandleFunc("GET "+b+"/routing", a.index)
+	mux.HandleFunc("GET "+b+"/quotas", a.index)
+	mux.HandleFunc("GET "+b+"/nodes", a.index)
+	mux.HandleFunc("GET "+b+"/logs", a.index)
+	mux.HandleFunc("GET "+b+"/settings", a.index)
 	mux.HandleFunc("GET "+b+"/login", a.loginPage)
 	mux.HandleFunc("GET "+b+"/static/app.js", a.asset("app.js", "application/javascript; charset=utf-8"))
 	mux.HandleFunc("GET "+b+"/static/login.js", a.asset("login.js", "application/javascript; charset=utf-8"))

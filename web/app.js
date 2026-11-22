@@ -59,9 +59,9 @@
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);
     }
-    return fetch('api/' + path, opts).then(function (res) {
+    return fetch(basePrefix() + '/api/' + String(path).replace(/^\/+/, ''), opts).then(function (res) {
       if (res.status === 401) {
-        location.href = 'login';
+        location.href = basePrefix() + '/login';
         throw new Error('unauthorized');
       }
       return res.json().catch(function () { return {}; }).then(function (data) {
@@ -135,10 +135,48 @@
     state.timer = null;
   }
 
+  var validPages = ['dashboard', 'inbounds', 'clients', 'outbounds', 'routing', 'quotas', 'nodes', 'logs', 'settings'];
+
+  function basePrefix() {
+    var p = window.location.pathname || '/';
+    var idx = p.indexOf('/static/');
+    if (idx !== -1) p = p.slice(0, idx);
+    for (var i = 0; i < validPages.length; i++) {
+      var seg = '/' + validPages[i];
+      if (p === seg || p.endsWith(seg) || p.endsWith(seg + '/')) {
+        p = p.slice(0, p.lastIndexOf(seg));
+        break;
+      }
+    }
+    p = p.replace(/\/+$/, '');
+    return p || '';
+  }
+
+  function pageFromLocation() {
+    var parts = (window.location.pathname || '/').split('/').filter(Boolean);
+    if (parts.length > 0) {
+      var last = parts[parts.length - 1].toLowerCase();
+      if (validPages.indexOf(last) !== -1) return last;
+    }
+    return 'dashboard';
+  }
+
+  function syncUrlForPage(page) {
+    try {
+      var base = basePrefix();
+      var target = page === 'dashboard' ? (base + '/') : (base + '/' + page);
+      if (window.location.pathname !== target) {
+        window.history.pushState({ fapPage: page }, '', target);
+      }
+    } catch (_) {}
+  }
+
   function go(page) {
+    if (validPages.indexOf(page) === -1) page = 'dashboard';
     stopTimer();
     state.page = page;
-    titleEl.textContent = titles[page];
+    syncUrlForPage(page);
+    titleEl.textContent = titles[page] || page;
     topActions.innerHTML = '';
     document.querySelectorAll('#nav button').forEach(function (b) {
       b.classList.toggle('on', b.dataset.page === page);
@@ -1456,7 +1494,7 @@ function renderRouting() {
         }
         api('POST', 'password', { old: f.old.value, new: f.n1.value }).then(function () {
           toast('Password updated; please sign in again');
-          setTimeout(function () { location.href = 'login'; }, 900);
+          setTimeout(function () { location.href = basePrefix() + '/login'; }, 900);
         }).catch(function (x) { err.textContent = x.message; });
       });
 
@@ -1642,7 +1680,7 @@ function renderRouting() {
   });
 
   document.getElementById('logoutBtn').addEventListener('click', function () {
-    api('POST', 'logout').then(function () { location.href = 'login'; }).catch(fail);
+    api('POST', 'logout').then(function () { location.href = basePrefix() + '/login'; }).catch(fail);
   });
 
   document.addEventListener('keydown', function (e) {
