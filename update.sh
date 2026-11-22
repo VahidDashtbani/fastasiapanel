@@ -4,6 +4,7 @@ set -euo pipefail
 REPO_OWNER_SLASH="VahidDashtbani/fastasiapanel"
 REPO_URL="https://github.com/${REPO_OWNER_SLASH}.git"
 API_COMMIT_URL="https://api.github.com/repos/${REPO_OWNER_SLASH}/commits/main"
+RELEASES_API_URL="https://api.github.com/repos/${REPO_OWNER_SLASH}/releases/latest"
 
 APP_NAME="fastasiapanel"
 INSTALL_DIR="/usr/local/bin"
@@ -22,6 +23,29 @@ if [[ "${EUID}" -ne 0 ]]; then
 fi
 
 mkdir -p "${CONFIG_DIR}"
+
+# حفظ تنظیمات فعلی (یوزرنیم، پسورد، پورت، base path و دیتابیس)
+PREV_DB_TYPE=""
+PREV_DB_DSN=""
+
+read_db_from_file() {
+  local f="$1"
+  [[ -f "$f" ]] || return 0
+  local t d
+  t=$(grep -E '^(FAP_DB_TYPE|DB_TYPE)=' "$f" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+  d=$(grep -E '^(FAP_DB_DSN|DB_DSN)=' "$f" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+  [[ -n "$t" && -z "$PREV_DB_TYPE" ]] && PREV_DB_TYPE="$t"
+  [[ -n "$d" && -z "$PREV_DB_DSN" ]] && PREV_DB_DSN="$d"
+}
+
+read_db_from_file "${ENV_FILE}"
+read_db_from_file "/etc/systemd/system/${SERVICE_NAME}"
+
+if [[ "${PREV_DB_DSN}" == postgres://* || "${PREV_DB_DSN}" == postgresql://* ]]; then
+  PREV_DB_TYPE="postgres"
+elif [[ -z "${PREV_DB_TYPE}" ]] && command -v psql >/dev/null 2>&1 && runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname='fastasiapanel'" 2>/dev/null | grep -q 1; then
+  PREV_DB_TYPE="postgres"
+fi
 
 get_remote_commit() {
   if command -v curl >/dev/null 2>&1; then
@@ -54,64 +78,109 @@ if [[ -n "${REMOTE_SHA}" && -n "${LOCAL_SHA}" && "${REMOTE_SHA}" == "${LOCAL_SHA
   exit 0
 fi
 
-# حفظ تنظیمات فعلی (یوزرنیم، پسورد، پورت، base path، دیتابیس)
 BACKUP_DIR="/var/backups/${APP_NAME}/pre_update_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "${BACKUP_DIR}"
 [[ -f "${ENV_FILE}" ]] && cp -af "${ENV_FILE}" "${BACKUP_DIR}/"
 [[ -f "${CONFIG_DIR}/${APP_NAME}.db" ]] && cp -af "${CONFIG_DIR}/${APP_NAME}.db" "${BACKUP_DIR}/"
 
-# اطمینان از وجود Go برای بیلد مستقیم از آخرین main
-if ! command -v go >/dev/null 2>&1; then
-  log_info "Go not found, installing golang..."
-  if command -v apt-get >/dev/null 2>&1; then
-    apt-get update -y >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y golang-go >/dev/null 2>&1
-  fi
-fi
+ARCH_RAW="$(uname -m)"
+case "${ARCH_RAW}" in
+  x86_64|amd64) ARCH="amd64" ;;
+  aarch64|arm64) ARCH="arm64" ;;
+  *) ARCH="amd64" ;;
+esac
 
 SRC_DIR="$(mktemp -d)"
 trap 'rm -rf "${SRC_DIR}"' EXIT
 
-log_info "Fetching latest source from main..."
-git clone --depth 1 --branch main "${REPO_URL}" "${SRC_DIR}/repo" >/dev/null 2>&1
+INSTALLED_OK=0
 
-if [[ -z "${REMOTE_SHA}" ]]; then
-  REMOTE_SHA="$(git -C "${SRC_DIR}/repo" rev-parse HEAD 2>/dev/null || true)"
+# اولویت ۱: دانلود مستقیم باینری/پکیج آماده از Release گیت‌هاب (بدون نیاز به کامپایل Go)
+RELEASE_TAG="$(curl -fsSL -H "Accept: application/vnd.github+json" "${RELEASES_API_URL}" 2>/dev/null \
+  | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1 || true)"
+
+CANDIDATE_URLS=()
+if [[ -n "${RELEASE_TAG}" ]]; then
+  CANDIDATE_URLS+=(
+    "https://github.com/${REPO_OWNER_SLASH}/releases/download/${RELEASE_TAG}/${APP_NAME}-linux-${ARCH}.tar.gz"
+    "https://github.com/${REPO_OWNER_SLASH}/releases/download/${RELEASE_TAG}/${APP_NAME}-linux-${ARCH}"
+  )
 fi
+CANDIDATE_URLS+=(
+  "https://github.com/${REPO_OWNER_SLASH}/releases/latest/download/${APP_NAME}-linux-${ARCH}.tar.gz"
+  "https://github.com/${REPO_OWNER_SLASH}/releases/latest/download/${APP_NAME}-linux-${ARCH}"
+)
 
-log_info "Building ${APP_NAME}..."
-BUILT_OK=0
-if (
-  cd "${SRC_DIR}/repo" && GOTOOLCHAIN=local go build -o "${SRC_DIR}/${APP_NAME}" .
-); then
-  BUILT_OK=1
-elif (
-  cd "${SRC_DIR}/repo" && GOPROXY=https://goproxy.cn,https://goproxy.io,direct go build -o "${SRC_DIR}/${APP_NAME}" .
-); then
-  BUILT_OK=1
-fi
-
-if [[ "${BUILT_OK}" -ne 1 ]]; then
-  log_warn "Local go build failed (likely toolchain 403). Falling back to GitHub release asset..."
-  ASSET_URL="https://github.com/${REPO_OWNER_SLASH}/releases/latest/download/${APP_NAME}-linux-amd64.tar.gz"
-  if curl -fsSL "${ASSET_URL}" -o "${SRC_DIR}/panel.tar.gz" && tar -xzf "${SRC_DIR}/panel.tar.gz" -C "${SRC_DIR}"; then
-    found_bin="$(find "${SRC_DIR}" -maxdepth 2 -type f -name "${APP_NAME}" | head -n1 || true)"
-    if [[ -n "${found_bin}" && "${found_bin}" != "${SRC_DIR}/${APP_NAME}" ]]; then
-      cp -f "${found_bin}" "${SRC_DIR}/${APP_NAME}"
+for url in "${CANDIDATE_URLS[@]}"; do
+  log_info "Downloading prebuilt panel from ${url}..."
+  if [[ "${url}" == *.tar.gz ]]; then
+    if curl -fsSL "${url}" -o "${SRC_DIR}/panel.tar.gz" && tar -xzf "${SRC_DIR}/panel.tar.gz" -C "${SRC_DIR}"; then
+      found_bin="$(find "${SRC_DIR}" -maxdepth 2 -type f -name "${APP_NAME}" | head -n1 || true)"
+      if [[ -n "${found_bin}" ]]; then
+        cp -f "${found_bin}" "${SRC_DIR}/${APP_NAME}"
+        INSTALLED_OK=1
+        break
+      fi
     fi
-    [[ -f "${SRC_DIR}/${APP_NAME}" ]] && BUILT_OK=1
+  else
+    if curl -fsSL "${url}" -o "${SRC_DIR}/${APP_NAME}" && [[ -s "${SRC_DIR}/${APP_NAME}" ]]; then
+      INSTALLED_OK=1
+      break
+    fi
+  fi
+done
+
+# اولویت ۲ (فالبک): اگر پکیج آماده در Release پیدا نشد، فقط در صورت وجود Go باینری بساز
+if [[ "${INSTALLED_OK}" -ne 1 ]]; then
+  log_warn "Prebuilt release asset not found; trying source build fallback..."
+  if command -v go >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
+    git clone --depth 1 --branch main "${REPO_URL}" "${SRC_DIR}/repo" >/dev/null 2>&1 || true
+    if [[ -d "${SRC_DIR}/repo" ]]; then
+      if (cd "${SRC_DIR}/repo" && GOTOOLCHAIN=local go build -o "${SRC_DIR}/${APP_NAME}" . 2>/dev/null); then
+        INSTALLED_OK=1
+      elif (cd "${SRC_DIR}/repo" && go build -o "${SRC_DIR}/${APP_NAME}" . 2>/dev/null); then
+        INSTALLED_OK=1
+      fi
+    fi
   fi
 fi
 
-if [[ "${BUILT_OK}" -ne 1 ]]; then
-  log_warn "Failed to build or fetch ${APP_NAME} binary."
+if [[ "${INSTALLED_OK}" -ne 1 || ! -s "${SRC_DIR}/${APP_NAME}" ]]; then
+  log_warn "Panel update failed: could not download prebuilt binary or build from source."
   exit 1
 fi
 
 systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
 install -m 755 "${SRC_DIR}/${APP_NAME}" "${INSTALL_DIR}/${APP_NAME}"
 
-if [[ -f "${SRC_DIR}/repo/scripts/fastasian.sh" ]]; then
-  install -m 755 "${SRC_DIR}/repo/scripts/fastasian.sh" "${INSTALL_DIR}/fastasian"
+# به‌روزرسانی اسکریپت fastasian از main در صورت دسترسی
+curl -fsSL "https://raw.githubusercontent.com/${REPO_OWNER_SLASH}/main/scripts/fastasian.sh?v=$(date +%s)" -o "${INSTALL_DIR}/fastasian" 2>/dev/null && chmod 755 "${INSTALL_DIR}/fastasian" || true
+
+# حفظ قطعی تنظیمات دیتابیس قبلی
+if [[ -n "${PREV_DB_TYPE}" ]]; then
+  mkdir -p "${CONFIG_DIR}"
+  touch "${ENV_FILE}"
+  python3 - "$ENV_FILE" "$PREV_DB_TYPE" "$PREV_DB_DSN" <<'PYEOF'
+import sys
+from pathlib import Path
+
+env_path = Path(sys.argv[1])
+db_type = sys.argv[2]
+db_dsn = sys.argv[3]
+
+lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+keys_to_replace = {"DB_TYPE", "FAP_DB_TYPE", "DB_DSN", "FAP_DB_DSN"}
+filtered = [ln for ln in lines if ln.split("=", 1)[0].strip() not in keys_to_replace]
+
+filtered.append(f"DB_TYPE={db_type}")
+filtered.append(f"FAP_DB_TYPE={db_type}")
+if db_dsn:
+    filtered.append(f"DB_DSN={db_dsn}")
+    filtered.append(f"FAP_DB_DSN={db_dsn}")
+
+env_path.write_text("\n".join(filtered).rstrip() + "\n", encoding="utf-8")
+PYEOF
+  log_info "Preserved database configuration: ${PREV_DB_TYPE}"
 fi
 
 cat <<STATEEOF > "${STATE_FILE}"
@@ -123,4 +192,4 @@ systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1 || true
 systemctl start "${SERVICE_NAME}"
 
-log_ok "Updated ${APP_NAME} to latest main (${REMOTE_SHA:0:7})."
+log_ok "FastAsiaPanel updated successfully (${REMOTE_SHA:0:7})."
