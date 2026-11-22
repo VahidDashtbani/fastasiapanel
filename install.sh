@@ -330,20 +330,10 @@ collect_user_configuration() {
             pg_pass="$(gen_random_string 18)"
 
             if command -v psql >/dev/null 2>&1; then
-                runuser -u postgres -- psql -v ON_ERROR_STOP=1 >/dev/null 2>&1 <<PGEOF || true
-DO \$\$
-BEGIN
-   IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${pg_user}') THEN
-      CREATE USER ${pg_user} WITH PASSWORD '${pg_pass}';
-   ELSE
-      ALTER USER ${pg_user} WITH PASSWORD '${pg_pass}';
-   END IF;
-END
-\$\$;
-SELECT 'CREATE DATABASE ${pg_db} OWNER ${pg_user}'
-WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${pg_db}')\gexec
-GRANT ALL PRIVILEGES ON DATABASE ${pg_db} TO ${pg_user};
-PGEOF
+                runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "CREATE USER ${pg_user} WITH PASSWORD '${pg_pass}';" >/dev/null 2>&1 || \
+                runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "ALTER USER ${pg_user} WITH PASSWORD '${pg_pass}';" >/dev/null 2>&1 || true
+                runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE ${pg_db} OWNER ${pg_user};" >/dev/null 2>&1 || true
+                runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "GRANT ALL PRIVILEGES ON DATABASE ${pg_db} TO ${pg_user};" >/dev/null 2>&1 || true
             fi
 
             DB_TYPE="postgres"
