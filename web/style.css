@@ -368,3 +368,4 @@ tbody tr:hover {
   border: 1px solid rgba(56, 189, 248, 0.30) !important;
   color: #7dd3fc !important;
 }
+.fap-separated-section { display: none; }

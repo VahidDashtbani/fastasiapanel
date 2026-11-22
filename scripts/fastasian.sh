@@ -394,8 +394,11 @@ update_panel() {
   LOGI "Checking latest commit and running update.sh while preserving credentials and database..."
   local update_url="https://raw.githubusercontent.com/VahidDashtbani/fastasiapanel/main/update.sh"
   local tmp_upd="/tmp/fastasia-update.$$.sh"
-  curl -fsSL "${update_url}?v=$(date +%s)" -o "${tmp_upd}"
-  bash "${tmp_upd}"
+  if ! curl -fsSL "${update_url}?v=$(date +%s)" -o "${tmp_upd}" || ! bash "${tmp_upd}"; then
+    rm -f "${tmp_upd}" "${backup_tmp}" -rf 2>/dev/null || true
+    LOGE "Panel update failed."
+    return 1
+  fi
   rm -f "${tmp_upd}"
 
   for f in fastasiapanel.env panel.env install-result.env; do
@@ -807,7 +810,7 @@ if [[ $# -gt 0 ]]; then
         else
             rm -f "${tmp_upd}"
             echo "[ERR] Failed to run update.sh" >&2
-            return 1
+            exit 1
         fi
         ;;
     uninstall) uninstall_panel ;;

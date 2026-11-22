@@ -11,6 +11,7 @@
     dashboard: 'Dashboard',
     inbounds: 'Inbounds',
     clients: 'Clients',
+    outbounds: 'Outbounds',
     routing: 'Routing Rules',
     quotas: 'Quota Groups',
     nodes: 'Nodes & API',
@@ -145,6 +146,7 @@
     if (page === 'dashboard') renderDashboard();
     if (page === 'inbounds') renderInbounds();
     if (page === 'clients') renderClients();
+    if (page === 'outbounds') renderOutbounds();
     if (page === 'routing') renderRouting();
     if (page === 'quotas') renderQuotas();
     if (page === 'nodes') renderNodes();
@@ -702,11 +704,59 @@
     }
   }
 
-  function renderRouting() {
+  function renderOutbounds() {
+    var root = document.getElementById('view') || document.getElementById('page') || document.querySelector('main');
+    if (!root) return;
+    root.innerHTML =
+      '<div class="card">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">' +
+          '<div><h3 style="margin:0">Outbounds</h3><div class="hint">Manage outbound proxies, relay chains &amp; upstream protocols independently</div></div>' +
+          '<div style="display:flex;gap:8px">' +
+            '<button class="btn pri" data-act="new-outbound">+ New Outbound</button>' +
+          '</div>' +
+        '</div>' +
+        '<div id="outbounds-table-box"><div class="hint">Loading outbounds...</div></div>' +
+      '</div>';
+
+    api('GET', 'outbounds').then(function (list) {
+      state.outbounds = list || [];
+      var box = document.getElementById('outbounds-table-box');
+      if (!box) return;
+      if (!state.outbounds.length) {
+        box.innerHTML = '<div class="empty" style="padding:20px">No custom outbounds configured. Built-in <b>direct</b> and <b>blocked</b> tags are always available in Routing Rules.</div>';
+        return;
+      }
+      var rows = state.outbounds.map(function (o) {
+        var oid = esc(o.id || o.tag || '');
+        var tag = esc(o.tag || '-');
+        var remark = o.remark ? '<div class="hint" style="font-size:12px">' + esc(o.remark) + '</div>' : '';
+        var proto = esc((o.protocol || o.type || '-').toUpperCase());
+        var endpoint = esc((o.address || o.server || '') + (o.port ? ':' + o.port : ''));
+        return (
+          '<tr>' +
+            '<td><button class="switch sm ' + (o.enable !== false ? 'on' : '') + '" data-act="toggle-outbound" data-oid="' + oid + '"></button></td>' +
+            '<td><span class="tag">' + tag + '</span>' + remark + '</td>' +
+            '<td>' + proto + '</td>' +
+            '<td class="ltr">' + (endpoint || '-') + '</td>' +
+            '<td style="text-align:right"><button class="icon-btn danger" data-act="del-outbound" data-oid="' + oid + '">Delete</button></td>' +
+          '</tr>'
+        );
+      }).join('');
+
+      box.innerHTML =
+        '<div class="table-wrap"><table><thead><tr>' +
+          '<th>Status</th><th>Tag</th><th>Protocol</th><th>Endpoint</th><th style="text-align:right">Actions</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+    }).catch(function (err) {
+      var box = document.getElementById('outbounds-table-box');
+      if (box) box.innerHTML = '<div class="empty">Failed to load outbounds: ' + esc(err && err.message ? err.message : err) + '</div>';
+    });
+  }
+
+function renderRouting() {
     topActions.innerHTML = '<div class="top-tools">' +
       '<button class="btn sec" data-act="update-geo">Update GeoIP / GeoSite</button>' +
-      '<button class="btn sec" data-act="new-outbound">+ New Outbound</button>' +
-      '<button class="btn" data-act="new-rule">+ New Rule</button></div>';
+            '<button class="btn" data-act="new-rule">+ New Rule</button></div>';
 
     Promise.all([api('GET', 'outbounds'), api('GET', 'routing'), api('GET', 'inbounds')]).then(function (res) {
       state.outbounds = res[0] || [];
@@ -1499,10 +1549,10 @@
       return api('DELETE', 'routing/' + el.dataset.rid).then(function () { toast('Rule deleted'); renderRouting(); }).catch(fail);
     }
     if (act === 'toggle-ob') {
-      return api('POST', 'outbounds/' + el.dataset.oid + '/toggle').then(function () { renderRouting(); }).catch(fail);
+      return api('POST', 'outbounds/' + el.dataset.oid + '/toggle').then(function () { if (typeof renderOutbounds === 'function' && document.getElementById('outbounds-table-box')) renderOutbounds(); else renderRouting(); }).catch(fail);
     }
     if (act === 'del-ob') {
-      return api('DELETE', 'outbounds/' + el.dataset.oid).then(function () { toast('Outbound deleted'); renderRouting(); }).catch(fail);
+      return api('DELETE', 'outbounds/' + el.dataset.oid).then(function () { toast('Outbound deleted'); if (typeof renderOutbounds === 'function' && document.getElementById('outbounds-table-box')) renderOutbounds(); else renderRouting(); }).catch(fail);
     }
     if (act === 'view-clients' && ib) {
       state.clInboundFilter = ib.id;
