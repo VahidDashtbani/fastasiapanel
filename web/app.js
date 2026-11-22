@@ -2524,3 +2524,134 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 });
+
+
+// QR Code with Config & Subscription switcher
+(function() {
+  let currentMode = "config";
+  let currentData = { config: "", subscription: "", label: "" };
+
+  function buildSubUrl(item) {
+    if (!item) return "";
+    if (item.subUrl) return item.subUrl;
+    if (item.subscriptionUrl) return item.subscriptionUrl;
+    if (item.sub_url) return item.sub_url;
+    if (item.subscription_url) return item.subscription_url;
+    const token = item.subId || item.sub_id || item.token || item.uuid || item.id || "";
+    const origin = window.location.origin;
+    const baseMatch = window.location.pathname.match(/^(\/[^/]+)/);
+    const basePath = baseMatch ? baseMatch[1] : "";
+    return token ? `${origin}${basePath}/sub/${encodeURIComponent(String(token))}` : (item.link || item.uri || "");
+  }
+
+  function buildConfigValue(item) {
+    if (!item) return "";
+    if (typeof item === "string") return item;
+    return item.link || item.uri || item.config || item.url || item.vless || item.vmess || buildSubUrl(item);
+  }
+
+  function renderQrIntoBox(text) {
+    const box = document.getElementById("fapQrCanvasBox");
+    if (!box) return;
+    box.innerHTML = "";
+    const val = (text || "").trim();
+    if (!val) {
+      box.innerHTML = '<span style="color:#111827;font-size:13px;">No data available</span>';
+      return;
+    }
+
+    if (typeof window.QRCode === "function") {
+      try {
+        new window.QRCode(box, { text: val, width: 196, height: 196, correctLevel: window.QRCode.CorrectLevel ? window.QRCode.CorrectLevel.M : 0 });
+        return;
+      } catch (_) {}
+    }
+
+    // Fallback to public QR image generator if local QRCode lib is absent
+    const img = document.createElement("img");
+    img.alt = "QR Code";
+    img.width = 196;
+    img.height = 196;
+    img.style.borderRadius = "8px";
+    img.src = "https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=" + encodeURIComponent(val);
+    img.onerror = function() {
+      box.innerHTML = '<div style="color:#111827;font-size:11px;word-break:break-all;padding:8px;">' + val.replace(/</g, "&lt;") + '</div>';
+    };
+    box.appendChild(img);
+  }
+
+  function syncQrTab() {
+    const tabConfig = document.getElementById("fapQrTabConfig");
+    const tabSub = document.getElementById("fapQrTabSub");
+    const labelEl = document.getElementById("fapQrValueLabel");
+    const inputEl = document.getElementById("fapQrValueInput");
+
+    const isSub = currentMode === "subscription";
+    const activeVal = isSub ? (currentData.subscription || currentData.config) : (currentData.config || currentData.subscription);
+
+    if (tabConfig) {
+      tabConfig.className = !isSub ? "btn btn-primary" : "btn btn-secondary";
+    }
+    if (tabSub) {
+      tabSub.className = isSub ? "btn btn-primary" : "btn btn-secondary";
+    }
+    if (labelEl) {
+      labelEl.textContent = isSub ? "Subscription Link" : "Config Link";
+    }
+    if (inputEl) {
+      inputEl.value = activeVal || "";
+    }
+    renderQrIntoBox(activeVal || "");
+  }
+
+  window.openFapQrModal = function(payload, defaultTab) {
+    const modal = document.getElementById("fapQrModal");
+    const titleEl = document.getElementById("fapQrTitle");
+    if (!modal) return;
+
+    const item = payload && typeof payload === "object" ? payload : { link: String(payload || "") };
+    currentData = {
+      config: buildConfigValue(item),
+      subscription: buildSubUrl(item),
+      label: item.email || item.name || item.remark || item.tag || ""
+    };
+    currentMode = defaultTab === "subscription" ? "subscription" : "config";
+
+    if (titleEl) {
+      titleEl.textContent = currentData.label ? `QR Code - ${currentData.label}` : "QR Code";
+    }
+
+    modal.style.display = "flex";
+    modal.classList.remove("hidden");
+    syncQrTab();
+  };
+
+  window.closeFapQrModal = function() {
+    const modal = document.getElementById("fapQrModal");
+    if (!modal) return;
+    modal.style.display = "none";
+    modal.classList.add("hidden");
+  };
+
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("fapQrCloseBtn")?.addEventListener("click", window.closeFapQrModal);
+    document.getElementById("fapQrTabConfig")?.addEventListener("click", () => {
+      currentMode = "config";
+      syncQrTab();
+    });
+    document.getElementById("fapQrTabSub")?.addEventListener("click", () => {
+      currentMode = "subscription";
+      syncQrTab();
+    });
+    document.getElementById("fapQrCopyBtn")?.addEventListener("click", async () => {
+      const inputEl = document.getElementById("fapQrValueInput");
+      if (!inputEl || !inputEl.value) return;
+      try {
+        await navigator.clipboard.writeText(inputEl.value);
+      } catch (_) {
+        inputEl.select();
+        document.execCommand("copy");
+      }
+    });
+  });
+})();

@@ -76,5 +76,30 @@
   </div>
 </div>
 
+
+<div id="fapQrModal" class="modal-backdrop hidden" style="position:fixed;inset:0;background:rgba(4,7,18,0.82);backdrop-filter:blur(8px);display:none;align-items:center;justify-content:center;z-index:1000;">
+  <div class="card" style="width:min(460px,94vw);padding:20px;border:1px solid rgba(129,140,248,0.4);border-radius:16px;display:grid;gap:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3 id="fapQrTitle" style="margin:0;">QR Code</h3>
+      <button type="button" id="fapQrCloseBtn" class="btn btn-secondary" style="padding:4px 10px;">✕</button>
+    </div>
+
+    <div style="display:flex;gap:8px;">
+      <button type="button" id="fapQrTabConfig" class="btn btn-primary" style="flex:1;">Config</button>
+      <button type="button" id="fapQrTabSub" class="btn btn-secondary" style="flex:1;">Subscription</button>
+    </div>
+
+    <div id="fapQrCanvasBox" style="display:flex;align-items:center;justify-content:center;min-height:220px;background:#ffffff;border-radius:12px;padding:12px;"></div>
+
+    <div style="display:grid;gap:6px;">
+      <label id="fapQrValueLabel" style="font-size:12px;opacity:0.85;">Value</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="fapQrValueInput" readonly style="flex:1;padding:8px 10px;border-radius:8px;font-family:monospace;font-size:12px;" />
+        <button type="button" id="fapQrCopyBtn" class="btn btn-secondary">Copy</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
