@@ -1607,57 +1607,213 @@ function refreshLiveClientsTraffic() {
   }).catch(function () {});
 }
 
-function fapFindInboundsSearchRow() {
+function fapGenUUIDv4() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    var r = (Math.random() * 16) | 0;
+    var v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+function fapGenRandomEmail() {
+  var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  var tag = '';
+  for (var i = 0; i < 6; i++) {
+    tag += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return 'user_' + tag + '@fastasian.local';
+}
+
+function fapFmtBytesLive(val) {
+  var n = Number(val || 0);
+  if (!isFinite(n) || n <= 0) return '0 B';
+  var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  var idx = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  var num = n / Math.pow(1024, idx);
+  return (idx === 0 ? Math.round(num) : num.toFixed(2)) + ' ' + units[idx];
+}
+
+function fapIsInboundsSectionVisible() {
+  var activeNav = document.querySelector('#sidebar .active, .nav .active, nav .active, [data-nav].active, [data-tab].active, [data-view].active, .tab-btn.active, .nav-item.active');
+  if (activeNav) {
+    var k = ((activeNav.getAttribute('data-view') || activeNav.getAttribute('data-tab') || activeNav.getAttribute('data-nav') || activeNav.textContent || '')).trim().toLowerCase();
+    if (k.includes('inbound')) return true;
+    if (k.length > 0 && !k.includes('inbound')) return false;
+  }
+  var sec = document.querySelector('#inboundsSection, #inbounds-view, #view-inbounds, [data-view="inbounds"]');
+  if (sec) {
+    var r = sec.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) return true;
+  }
+  var headings = Array.from(document.querySelectorAll('h1, h2, h3, .section-title, .page-title'));
+  for (var i = 0; i < headings.length; i++) {
+    var h = headings[i];
+    var rect = h.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0 && /^inbounds?$/i.test((h.textContent || '').trim())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function fapFindInboundsSearchInput() {
   var inputs = Array.from(document.querySelectorAll('input[type="search"], input[type="text"], input:not([type])'));
   for (var i = 0; i < inputs.length; i++) {
     var inp = inputs[i];
-    if (inp.closest('#fapInboundJsonModal, #sidebar, nav, .sidebar, .nav')) continue;
-    var rect = inp.getBoundingClientRect ? inp.getBoundingClientRect() : { width: 0, height: 0 };
-    if (rect.width === 0 && rect.height === 0) continue;
+    if (inp.closest('#fapInboundJsonModal, #sidebar, nav, .sidebar, .nav, .modal')) continue;
+    var rect = inp.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) continue;
     var hint = ((inp.placeholder || '') + ' ' + (inp.id || '') + ' ' + (inp.className || '') + ' ' + (inp.getAttribute('aria-label') || '')).toLowerCase();
-    var inInboundSection = Boolean(inp.closest('#inboundsSection, #inbounds-view, #view-inbounds, [data-view="inbounds"]'));
-    if (inInboundSection || /search|filter|inbound|جستجو|فیلتر/.test(hint)) {
+    var inInboundSec = Boolean(inp.closest('#inboundsSection, #inbounds-view, #view-inbounds, [data-view="inbounds"]'));
+    if (inInboundSec || /search|filter|inbound|جستجو|فیلتر/.test(hint)) {
       return inp;
     }
   }
   return null;
 }
 
-function fapFindInboundsHeaderTarget() {
-  var candidates = Array.from(document.querySelectorAll('h1, h2, h3, .section-title, .page-title, .card-header, header'));
-  for (var i = 0; i < candidates.length; i++) {
-    var el = candidates[i];
-    var rect = el.getBoundingClientRect ? el.getBoundingClientRect() : { width: 1, height: 1 };
-    if (rect.width === 0 && rect.height === 0) continue;
-    var txt = (el.textContent || '').trim();
-    if (/^inbounds?$/i.test(txt) || /\binbounds\b/i.test(txt)) {
-      if (el.closest('#sidebar, nav, .sidebar, .nav')) continue;
-      return el;
-    }
-  }
-  return (
-    document.querySelector('#inboundsSection, #inbounds-view, #view-inbounds, [data-view="inbounds"]') ||
-    document.querySelector('main')
-  );
-}
-
-function fapInjectInboundBarStyles() {
-  if (document.getElementById('fapInboundBarResponsiveStyle')) return;
+function fapInjectCustomStyles() {
+  if (document.getElementById('fapCustomPanelStyles')) return;
   var st = document.createElement('style');
-  st.id = 'fapInboundBarResponsiveStyle';
+  st.id = 'fapCustomPanelStyles';
   st.textContent =
     '#fapInboundPageJsonBar{display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;flex-shrink:0;}' +
     '#fapInboundPageJsonBar .fap-ib-json-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;' +
       'height:36px;padding:0 12px;border-radius:10px;font-size:12.5px;font-weight:600;white-space:nowrap;cursor:pointer;' +
-      'background:rgba(15,23,42,0.62);color:#e2e8f0;border:1px solid rgba(125,211,252,0.28);' +
-      'backdrop-filter:blur(10px);transition:all .18s ease;}' +
-    '#fapInboundPageJsonBar .fap-ib-json-btn:hover{border-color:rgba(125,211,252,0.65);background:rgba(30,41,59,0.85);color:#fff;}' +
-    '#fapInboundPageJsonBar .fap-ib-json-btn.primary{background:linear-gradient(135deg,rgba(14,165,233,0.28),rgba(56,189,248,0.18));border-color:rgba(56,189,248,0.45);}' +
+      'background:rgba(15,23,42,0.68);color:#e2e8f0;border:1px solid rgba(125,211,252,0.32);' +
+      'backdrop-filter:blur(10px);transition:all .16s ease;}' +
+    '#fapInboundPageJsonBar .fap-ib-json-btn:hover{border-color:rgba(125,211,252,0.7);background:rgba(30,41,59,0.9);color:#fff;}' +
+    '#fapInboundPageJsonBar .fap-ib-json-btn.primary{background:linear-gradient(135deg,rgba(14,165,233,0.32),rgba(56,189,248,0.2));border-color:rgba(56,189,248,0.5);}' +
+    '.fap-rand-email-btn{height:34px;padding:0 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;' +
+      'background:rgba(56,189,248,0.16);color:#7dd3fc;border:1px solid rgba(56,189,248,0.38);white-space:nowrap;}' +
+    '.fap-rand-email-btn:hover{background:rgba(56,189,248,0.28);color:#fff;}' +
+    '.fap-live-traffic-badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-variant-numeric:tabular-nums;' +
+      'padding:2px 8px;border-radius:999px;background:rgba(15,23,42,0.55);border:1px solid rgba(148,163,184,0.22);color:#cbd5e1;}' +
     '@media (max-width:640px){' +
       '#fapInboundPageJsonBar{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;}' +
-      '#fapInboundPageJsonBar .fap-ib-json-btn{width:100%;height:38px;padding:0 10px;font-size:12px;}' +
+      '#fapInboundPageJsonBar .fap-ib-json-btn{width:100%;height:38px;font-size:12px;}' +
     '}';
   document.head.appendChild(st);
+}
+
+function fapEnhanceClientModalFields() {
+  var modals = Array.from(document.querySelectorAll('.modal, [role="dialog"], .drawer, form'));
+  for (var i = 0; i < modals.length; i++) {
+    var m = modals[i];
+    if (m.id === 'fapInboundJsonModal') continue;
+    var rect = m.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) continue;
+    var txt = (m.textContent || '').toLowerCase();
+    if (!txt.includes('client') && !txt.includes('uuid') && !txt.includes('email')) continue;
+
+    var inputs = Array.from(m.querySelectorAll('input'));
+    var emailInp = null;
+    var uuidInp = null;
+
+    for (var j = 0; j < inputs.length; j++) {
+      var inp = inputs[j];
+      var sig = ((inp.name || '') + ' ' + (inp.id || '') + ' ' + (inp.placeholder || '') + ' ' + (inp.getAttribute('aria-label') || '')).toLowerCase();
+      if (!emailInp && (inp.type === 'email' || sig.includes('email') || sig.includes('remark') || sig.includes('user'))) {
+        emailInp = inp;
+      }
+      if (!uuidInp && (sig.includes('uuid') || sig.includes('id') || sig.includes('password'))) {
+        uuidInp = inp;
+      }
+    }
+
+    if (emailInp && !emailInp.dataset.fapRandWired) {
+      emailInp.dataset.fapRandWired = '1';
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'fap-rand-email-btn';
+      btn.textContent = 'Random';
+      btn.onclick = function () {
+        emailInp.value = fapGenRandomEmail();
+        emailInp.dispatchEvent(new Event('input', { bubbles: true }));
+        emailInp.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      if (emailInp.parentElement) {
+        emailInp.parentElement.style.display = 'flex';
+        emailInp.parentElement.style.alignItems = 'center';
+        emailInp.parentElement.style.gap = '6px';
+        emailInp.insertAdjacentElement('afterend', btn);
+      }
+    }
+
+    if (uuidInp) {
+      uuidInp.style.display = '';
+      uuidInp.removeAttribute('type');
+      if (uuidInp.type === 'hidden') uuidInp.type = 'text';
+      if (!uuidInp.dataset.fapSeeded && (!uuidInp.value || uuidInp.value.trim() === '')) {
+        uuidInp.value = fapGenUUIDv4();
+        uuidInp.dataset.fapSeeded = '1';
+        uuidInp.dispatchEvent(new Event('input', { bubbles: true }));
+        uuidInp.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+  }
+}
+
+function fapUpdateLiveClientTrafficDOM(inbounds) {
+  if (!Array.isArray(inbounds)) return;
+  var clientMap = {};
+  for (var i = 0; i < inbounds.length; i++) {
+    var ib = inbounds[i] || {};
+    var list = Array.isArray(ib.clients) ? ib.clients : (Array.isArray(ib.users) ? ib.users : []);
+    for (var j = 0; j < list.length; j++) {
+      var cl = list[j] || {};
+      var keys = [cl.id, cl.email, cl.uuid].filter(Boolean);
+      for (var k = 0; k < keys.length; k++) {
+        clientMap[String(keys[k]).toLowerCase()] = cl;
+      }
+    }
+  }
+
+  var rows = Array.from(document.querySelectorAll('tr, .client-row, .client-item, [data-client-email], [data-email]'));
+  for (var r = 0; r < rows.length; r++) {
+    var row = rows[r];
+    var rowKey = (row.getAttribute('data-client-email') || row.getAttribute('data-email') || row.getAttribute('data-client-id') || '').toLowerCase();
+    var matched = rowKey && clientMap[rowKey] ? clientMap[rowKey] : null;
+    if (!matched) {
+      var rowText = (row.textContent || '').toLowerCase();
+      for (var key in clientMap) {
+        if (key.includes('@') && rowText.includes(key)) {
+          matched = clientMap[key];
+          break;
+        }
+      }
+    }
+    if (!matched) continue;
+
+    var up = Number(matched.up || matched.upload || 0);
+    var down = Number(matched.down || matched.download || 0);
+    var badge = row.querySelector('.fap-live-traffic-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'fap-live-traffic-badge';
+      row.appendChild(badge);
+    }
+    badge.textContent = '↑ ' + fapFmtBytesLive(up) + '  ↓ ' + fapFmtBytesLive(down);
+  }
+}
+
+async function fapPollClientTrafficOneSecond() {
+  if (document.hidden) return;
+  fapEnhanceClientModalFields();
+  if (typeof api !== 'function') return;
+  try {
+    var data = await api('GET', 'inbounds');
+    var list = Array.isArray(data) ? data : (data && Array.isArray(data.inbounds) ? data.inbounds : null);
+    if (list) {
+      if (typeof state !== 'undefined' && state && typeof state === 'object') {
+        state.inbounds = list;
+      }
+      fapUpdateLiveClientTrafficDOM(list);
+    }
+  } catch (_) {}
 }
 
 function fapOpenInboundJsonModal(mode, initialJson) {
@@ -1673,7 +1829,7 @@ function fapOpenInboundJsonModal(mode, initialJson) {
 
   wrap.innerHTML =
     '<div style="width:100%;max-width:720px;border-radius:18px;padding:18px;' +
-      'background:rgba(15,23,42,0.94);border:1px solid rgba(125,211,252,0.35);' +
+      'background:rgba(15,23,42,0.95);border:1px solid rgba(125,211,252,0.35);' +
       'box-shadow:0 24px 60px rgba(0,0,0,0.65);color:#f8fafc;">' +
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">' +
         '<div>' +
@@ -1708,7 +1864,7 @@ function fapOpenInboundJsonModal(mode, initialJson) {
       remark: 'vless-reality',
       protocol: 'vless',
       port: 443,
-      clients: [{ email: 'user1', uuid: 'replace-or-auto-uuid' }]
+      clients: [{ email: 'user1', uuid: fapGenUUIDv4() }]
     }, null, 2);
     if (!isImport && initialJson) {
       ta.value = initialJson;
@@ -1817,6 +1973,7 @@ async function fapImportInboundsJSON(raw) {
         delete cl.id;
         delete cl.up;
         delete cl.down;
+        if (!cl.uuid) cl.uuid = fapGenUUIDv4();
         cl.inbound_id = inboundId;
         await api('POST', 'clients', cl);
         clCount++;
@@ -1828,17 +1985,22 @@ async function fapImportInboundsJSON(raw) {
   return 'Imported ' + ibCount + ' inbound(s) and ' + clCount + ' client(s).';
 }
 
-function fapPlaceInboundJsonButtons() {
-  fapInjectInboundBarStyles();
-  var existing = document.getElementById('fapInboundPageJsonBar');
-  var searchInp = fapFindInboundsSearchRow();
+function fapSyncInboundsToolbar() {
+  fapInjectCustomStyles();
+  var bar = document.getElementById('fapInboundPageJsonBar');
 
-  if (existing && searchInp && existing.parentElement && existing.parentElement.contains(searchInp)) {
+  if (!fapIsInboundsSectionVisible()) {
+    if (bar) bar.remove();
     return;
   }
-  if (existing) existing.remove();
 
-  var bar = document.createElement('div');
+  var searchInp = fapFindInboundsSearchInput();
+  if (bar && searchInp && bar.parentElement && bar.parentElement.contains(searchInp)) {
+    return;
+  }
+  if (bar) bar.remove();
+
+  bar = document.createElement('div');
   bar.id = 'fapInboundPageJsonBar';
   bar.innerHTML =
     '<button type="button" class="fap-ib-json-btn" id="fapInboundPageExportBtn">Export JSON</button>' +
@@ -1854,13 +2016,9 @@ function fapPlaceInboundJsonButtons() {
     searchInp.style.minWidth = '160px';
     searchInp.insertAdjacentElement('afterend', bar);
   } else {
-    var target = fapFindInboundsHeaderTarget();
-    if (!target) return;
-    if (target.tagName && /^H[1-6]$/.test(target.tagName) && target.parentElement) {
-      target.parentElement.insertBefore(bar, target.nextSibling);
-    } else {
-      target.prepend(bar);
-    }
+    var mainEl = document.querySelector('#inboundsSection, #inbounds-view, #view-inbounds, [data-view="inbounds"], main');
+    if (!mainEl) return;
+    mainEl.prepend(bar);
   }
 
   document.getElementById('fapInboundPageExportBtn').onclick = function () {
@@ -1871,5 +2029,10 @@ function fapPlaceInboundJsonButtons() {
   };
 }
 
-setInterval(fapPlaceInboundJsonButtons, 900);
-setTimeout(fapPlaceInboundJsonButtons, 200);
+setInterval(fapSyncInboundsToolbar, 600);
+setInterval(fapPollClientTrafficOneSecond, 1000);
+setTimeout(function () {
+  fapSyncInboundsToolbar();
+  fapEnhanceClientModalFields();
+  fapPollClientTrafficOneSecond();
+}, 250);
