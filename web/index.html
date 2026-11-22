@@ -47,5 +47,34 @@
 <div id="modalRoot"></div>
 <div id="toasts" aria-live="polite"></div>
 <script src="static/app.js"></script>
+
+<div id="outboundEditModal" class="modal-backdrop hidden" style="position:fixed;inset:0;background:rgba(4,7,18,0.78);backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;z-index:999;">
+  <div class="card" style="width:min(680px,94vw);max-height:88vh;overflow:auto;padding:20px;border:1px solid rgba(129,140,248,0.35);border-radius:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3 style="margin:0;">Edit Outbound</h3>
+      <button type="button" id="closeOutboundEditModal" class="btn btn-secondary" style="padding:4px 10px;">✕</button>
+    </div>
+    <form id="outboundEditForm" style="display:grid;gap:12px;">
+      <input type="hidden" id="editOutboundIndex" />
+      <label style="display:grid;gap:6px;">
+        <span>Tag</span>
+        <input type="text" id="editOutboundTag" required style="padding:8px 10px;border-radius:8px;" />
+      </label>
+      <label style="display:grid;gap:6px;">
+        <span>Protocol</span>
+        <input type="text" id="editOutboundProtocol" required style="padding:8px 10px;border-radius:8px;" />
+      </label>
+      <label style="display:grid;gap:6px;">
+        <span>Outbound JSON Config</span>
+        <textarea id="editOutboundJson" rows="12" style="width:100%;font-family:monospace;padding:10px;border-radius:8px;"></textarea>
+      </label>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:6px;">
+        <button type="button" id="cancelOutboundEditBtn" class="btn btn-secondary">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Outbound</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 </body>
 </html>

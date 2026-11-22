@@ -2433,3 +2433,94 @@ async function fapCheckLatestRelease() {
 setTimeout(fapCheckLatestRelease, 1500);
 setInterval(fapCheckLatestRelease, 3600000);
 // === FAP_RELEASE_NOTIFIER_END ===
+
+
+// Outbound direct edit handler
+window.openOutboundEditModal = function(idx, outboundObj) {
+  const modal = document.getElementById("outboundEditModal");
+  const idxInput = document.getElementById("editOutboundIndex");
+  const tagInput = document.getElementById("editOutboundTag");
+  const protoInput = document.getElementById("editOutboundProtocol");
+  const jsonInput = document.getElementById("editOutboundJson");
+  if (!modal || !idxInput || !tagInput || !protoInput || !jsonInput) return;
+
+  const data = outboundObj || (Array.isArray(window.__outboundsCache) ? window.__outboundsCache[idx] : {}) || {};
+  idxInput.value = String(idx ?? 0);
+  tagInput.value = data.tag || "";
+  protoInput.value = data.protocol || "";
+  jsonInput.value = JSON.stringify(data, null, 2);
+  modal.style.display = "flex";
+  modal.classList.remove("hidden");
+};
+
+function closeOutboundEditModal() {
+  const modal = document.getElementById("outboundEditModal");
+  if (!modal) return;
+  modal.style.display = "none";
+  modal.classList.add("hidden");
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const closeBtn = document.getElementById("closeOutboundEditModal");
+  const cancelBtn = document.getElementById("cancelOutboundEditBtn");
+  const form = document.getElementById("outboundEditForm");
+
+  if (closeBtn) closeBtn.addEventListener("click", closeOutboundEditModal);
+  if (cancelBtn) cancelBtn.addEventListener("click", closeOutboundEditModal);
+
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const idx = Number(document.getElementById("editOutboundIndex")?.value || 0);
+      const tag = document.getElementById("editOutboundTag")?.value.trim() || "";
+      const protocol = document.getElementById("editOutboundProtocol")?.value.trim() || "";
+      const rawJson = document.getElementById("editOutboundJson")?.value || "{}";
+
+      let parsed;
+      try {
+        parsed = JSON.parse(rawJson);
+      } catch (err) {
+        alert("Invalid JSON: " + err.message);
+        return;
+      }
+      parsed.tag = tag;
+      parsed.protocol = protocol;
+
+      const list = Array.isArray(window.__outboundsCache) ? [...window.__outboundsCache] : [];
+      list[idx] = parsed;
+      window.__outboundsCache = list;
+
+      const endpoints = [
+        `/api/outbounds/${idx}`,
+        `/api/outbounds/${encodeURIComponent(tag)}`,
+        "/api/outbounds"
+      ];
+
+      let saved = false;
+      for (const ep of endpoints) {
+        for (const method of ["PUT", "POST"]) {
+          try {
+            const payload = ep === "/api/outbounds" ? { index: idx, outbound: parsed, outbounds: list } : parsed;
+            const res = await fetch(ep, {
+              method,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+              saved = true;
+              break;
+            }
+          } catch (_) {}
+        }
+        if (saved) break;
+      }
+
+      closeOutboundEditModal();
+      if (typeof window.loadOutbounds === "function") {
+        window.loadOutbounds();
+      } else if (typeof window.renderOutbounds === "function") {
+        window.renderOutbounds(list);
+      }
+    });
+  }
+});
