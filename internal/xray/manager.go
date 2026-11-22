@@ -283,7 +283,7 @@ func (m *Manager) tick() {
 }
 
 func (m *Manager) Run(ctx context.Context) {
-	t := time.NewTicker(10 * time.Second)
+	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()
 	for {
 		select {
