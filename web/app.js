@@ -2655,3 +2655,266 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 })();
+
+
+// === FAP QR & SUBSCRIPTION CONFIGS START ===
+(function() {
+  let activeQrTab = "config";
+  let currentQrPayload = { config: "", subscription: "", title: "QR Code" };
+
+  function detectSubUrl(obj) {
+    if (!obj || typeof obj !== "object") return "";
+    const direct = obj.subUrl || obj.subscriptionUrl || obj.sub_url || obj.subscription_url || obj.subLink || "";
+    if (direct) return String(direct);
+    const token = obj.subId || obj.sub_id || obj.subToken || obj.token || obj.id || "";
+    if (!token) return "";
+    const origin = window.location.origin;
+    const baseMatch = window.location.pathname.match(/^(\/[^/]+)/);
+    const basePath = baseMatch ? baseMatch[1] : "";
+    return `${origin}${basePath}/sub/${encodeURIComponent(String(token))}`;
+  }
+
+  function detectConfigText(obj) {
+    if (!obj) return "";
+    if (typeof obj === "string") return obj;
+    if (Array.isArray(obj.configs) && obj.configs.length) {
+      return obj.configs.map(c => typeof c === "string" ? c : (c.link || c.uri || c.url || "")).filter(Boolean).join("\n");
+    }
+    return String(obj.config || obj.link || obj.uri || obj.url || obj.vless || obj.vmess || obj.trojan || obj.ss || "");
+  }
+
+  function renderCompactQr(text) {
+    const box = document.getElementById("fapQrCanvasBox");
+    if (!box) return;
+    box.innerHTML = "";
+    const val = (text || "").trim();
+    if (!val) {
+      box.innerHTML = '<span style="color:#0f172a;font-size:12px;text-align:center;">No link available</span>';
+      return;
+    }
+
+    // اگر لینک طولانی چند کانفیگ است، خط اول را برای QR تمیز انتخاب می‌کنیم
+    const qrText = val.includes("\n") ? val.split("\n")[0].trim() : val;
+
+    if (typeof window.QRCode === "function") {
+      try {
+        new window.QRCode(box, {
+          text: qrText,
+          width: 180,
+          height: 180,
+          colorDark: "#000000",
+          colorLight: "#ffffff"
+        });
+        const generated = box.querySelector("canvas, img");
+        if (generated) {
+          generated.style.width = "180px";
+          generated.style.height = "180px";
+          generated.style.maxWidth = "180px";
+          generated.style.maxHeight = "180px";
+          generated.style.display = "block";
+        }
+        return;
+      } catch (_) {}
+    }
+
+    const img = document.createElement("img");
+    img.alt = "QR";
+    img.src = "https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=4&data=" + encodeURIComponent(qrText);
+    img.style.width = "180px";
+    img.style.height = "180px";
+    img.style.maxWidth = "180px";
+    img.style.maxHeight = "180px";
+    img.style.display = "block";
+    img.onerror = function() {
+      box.innerHTML = '<div style="color:#0f172a;font-size:11px;word-break:break-all;padding:6px;text-align:center;">' + qrText.replace(/</g, "&lt;") + '</div>';
+    };
+    box.appendChild(img);
+  }
+
+  function refreshQrModalState() {
+    const isSub = activeQrTab === "subscription";
+    const cfgBtn = document.getElementById("fapQrTabConfig");
+    const subBtn = document.getElementById("fapQrTabSub");
+    const labelEl = document.getElementById("fapQrValueLabel");
+    const inputEl = document.getElementById("fapQrValueInput");
+
+    const val = isSub
+      ? (currentQrPayload.subscription || currentQrPayload.config)
+      : (currentQrPayload.config || currentQrPayload.subscription);
+
+    if (cfgBtn) {
+      cfgBtn.style.background = !isSub ? "#4f46e5" : "rgba(255,255,255,0.06)";
+      cfgBtn.style.color = !isSub ? "#ffffff" : "#cbd5e1";
+    }
+    if (subBtn) {
+      subBtn.style.background = isSub ? "#4f46e5" : "rgba(255,255,255,0.06)";
+      subBtn.style.color = isSub ? "#ffffff" : "#cbd5e1";
+    }
+    if (labelEl) {
+      labelEl.textContent = isSub ? "Subscription Link" : "Config Link";
+    }
+    if (inputEl) {
+      inputEl.value = val || "";
+    }
+    renderCompactQr(val || "");
+  }
+
+  window.openFapQrModal = function(item, preferredTab) {
+    const modal = document.getElementById("fapQrModal");
+    const titleEl = document.getElementById("fapQrTitle");
+    if (!modal) return;
+
+    const obj = (item && typeof item === "object") ? item : { config: String(item || "") };
+    currentQrPayload = {
+      config: detectConfigText(obj),
+      subscription: detectSubUrl(obj),
+      title: obj.email || obj.name || obj.remark || obj.tag || "QR Code"
+    };
+    activeQrTab = preferredTab === "subscription" ? "subscription" : "config";
+
+    if (titleEl) {
+      titleEl.textContent = `QR - ${currentQrPayload.title}`;
+    }
+
+    modal.style.display = "flex";
+    refreshQrModalState();
+  };
+
+  window.closeFapQrModal = function() {
+    const modal = document.getElementById("fapQrModal");
+    if (modal) modal.style.display = "none";
+  };
+
+  // تزریق لیست کانفیگ‌ها به بخش Subscription در صفحه
+  function populateSubscriptionConfigs(sourceItems) {
+    const items = Array.isArray(sourceItems) ? sourceItems : [];
+    const subContainers = Array.from(document.querySelectorAll('[id*="sub" i], [data-page*="sub" i], [class*="subscription" i]'))
+      .filter(el => el.offsetParent !== null || el.id.toLowerCase().includes("sub"));
+
+    for (const container of subContainers) {
+      if (container.id === "fapQrModal") continue;
+      let listBox = container.querySelector(".fap-sub-configs-panel");
+      if (!listBox) {
+        listBox = document.createElement("div");
+        listBox.className = "fap-sub-configs-panel";
+        listBox.style.cssText = "margin-top:14px;padding:12px;border-radius:10px;border:1px solid rgba(129,140,248,0.25);background:rgba(15,23,42,0.55);display:grid;gap:8px;";
+        container.appendChild(listBox);
+      }
+
+      const configs = [];
+      for (const row of items) {
+        if (!row || typeof row !== "object") continue;
+        const subUrl = detectSubUrl(row);
+        const cfgStr = detectConfigText(row);
+        if (Array.isArray(row.configs)) {
+          row.configs.forEach((c, i) => {
+            const link = typeof c === "string" ? c : (c.link || c.uri || c.url || "");
+            if (link) configs.push({ label: c.remark || c.name || c.tag || row.email || `Config #${i+1}`, config: link, subscription: subUrl });
+          });
+        } else if (cfgStr) {
+          cfgStr.split("\n").map(s => s.trim()).filter(Boolean).forEach((link, i) => {
+            configs.push({ label: row.email || row.remark || row.name || `Config #${i+1}`, config: link, subscription: subUrl });
+          });
+        }
+      }
+
+      if (!configs.length) {
+        listBox.innerHTML = '<div style="font-size:12px;color:#94a3b8;">No configs found for subscription yet.</div>';
+        continue;
+      }
+
+      listBox.innerHTML = '<div style="font-size:13px;font-weight:600;color:#e2e8f0;">Subscription Configs (' + configs.length + ')</div>';
+      configs.forEach((entry, idx) => {
+        const line = document.createElement("div");
+        line.style.cssText = "display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;background:rgba(2,6,23,0.65);border:1px solid rgba(255,255,255,0.08);";
+
+        const txt = document.createElement("input");
+        txt.type = "text";
+        txt.readOnly = true;
+        txt.value = entry.config;
+        txt.title = entry.label;
+        txt.style.cssText = "flex:1;min-width:0;padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:#090d1a;color:#cbd5e1;font-family:monospace;font-size:11px;";
+
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.textContent = "Copy";
+        copyBtn.style.cssText = "padding:6px 10px;border-radius:6px;border:1px solid rgba(148,163,184,0.3);background:rgba(255,255,255,0.08);color:#f8fafc;cursor:pointer;font-size:11px;";
+        copyBtn.onclick = async () => {
+          try { await navigator.clipboard.writeText(entry.config); } catch (_) {}
+        };
+
+        const qrBtn = document.createElement("button");
+        qrBtn.type = "button";
+        qrBtn.textContent = "QR";
+        qrBtn.style.cssText = "padding:6px 10px;border-radius:6px;border:1px solid rgba(129,140,248,0.5);background:rgba(79,70,229,0.3);color:#fff;cursor:pointer;font-size:11px;";
+        qrBtn.onclick = () => window.openFapQrModal({ email: entry.label, config: entry.config, subUrl: entry.subscription }, "config");
+
+        line.appendChild(txt);
+        line.appendChild(copyBtn);
+        line.appendChild(qrBtn);
+        listBox.appendChild(line);
+      });
+    }
+  }
+
+  // هوک روی fetch تا هر زمان لیست کلاینت‌ها یا سابسکریپشن دریافت شد، کانفیگ‌ها در بخش Subscription هم پر شوند
+  if (typeof window.fetch === "function" && !window.__fapSubFetchHooked) {
+    window.__fapSubFetchHooked = true;
+    const origFetch = window.fetch.bind(window);
+    window.fetch = async function(...args) {
+      const res = await origFetch(...args);
+      try {
+        const urlStr = typeof args[0] === "string" ? args[0] : (args[0]?.url || "");
+        if (/client|user|sub/i.test(urlStr)) {
+          const clone = res.clone();
+          const data = await clone.json().catch(() => null);
+          const arr = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : (Array.isArray(data?.clients) ? data.clients : []));
+          if (arr.length) {
+            window.__fapClientsCache = arr;
+            populateSubscriptionConfigs(arr);
+          }
+        }
+      } catch (_) {}
+      return res;
+    };
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("fapQrCloseBtn")?.addEventListener("click", window.closeFapQrModal);
+    document.getElementById("fapQrTabConfig")?.addEventListener("click", () => {
+      activeQrTab = "config";
+      refreshQrModalState();
+    });
+    document.getElementById("fapQrTabSub")?.addEventListener("click", () => {
+      activeQrTab = "subscription";
+      refreshQrModalState();
+    });
+    document.getElementById("fapQrCopyBtn")?.addEventListener("click", async () => {
+      const inp = document.getElementById("fapQrValueInput");
+      if (!inp || !inp.value) return;
+      try { await navigator.clipboard.writeText(inp.value); } catch (_) {}
+    });
+
+    // اگر دکمه‌های QR موجود در صفحه کلیک شدند ولی مودال باز نشد، مودال استاندارد را باز کند
+    document.addEventListener("click", (e) => {
+      const target = e.target.closest("button, a");
+      if (!target) return;
+      const txt = (target.textContent || "").trim().toLowerCase();
+      const title = (target.getAttribute("title") || "").toLowerCase();
+      if (txt === "qr" || title.includes("qr")) {
+        const modal = document.getElementById("fapQrModal");
+        if (modal && modal.style.display !== "flex") {
+          const row = target.closest("tr, .card, .item, [data-id]");
+          const rowText = row ? (row.innerText || "") : "";
+          const cached = Array.isArray(window.__fapClientsCache) ? window.__fapClientsCache : [];
+          const matched = cached.find(c => c.email && rowText.includes(c.email)) || { config: rowText };
+          window.openFapQrModal(matched, "config");
+        }
+      }
+      if (txt.includes("subscription") || title.includes("subscription")) {
+        setTimeout(() => populateSubscriptionConfigs(window.__fapClientsCache || []), 120);
+      }
+    });
+  });
+})();
+// === FAP QR & SUBSCRIPTION CONFIGS END ===
