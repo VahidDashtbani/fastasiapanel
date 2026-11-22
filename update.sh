@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
 REPO_OWNER_SLASH="VahidDashtbani/fastasiapanel"
 REPO_URL="https://github.com/${REPO_OWNER_SLASH}.git"
@@ -37,6 +37,7 @@ read_db_from_file() {
   d=$(grep -E '^(FAP_DB_DSN|DB_DSN)=' "$f" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
   [[ -n "$t" && -z "$PREV_DB_TYPE" ]] && PREV_DB_TYPE="$t"
   [[ -n "$d" && -z "$PREV_DB_DSN" ]] && PREV_DB_DSN="$d"
+  return 0
 }
 
 read_db_from_file "${ENV_FILE}"
