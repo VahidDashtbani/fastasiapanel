@@ -1920,8 +1920,18 @@ function fapEnhanceClientModalFields() {
   }
 }
 
+var fapPrevTrafficSample = {};
+
+function fapFmtRateLive(bytesPerSec) {
+  if (!bytesPerSec || bytesPerSec <= 0) return '0 B/s';
+  if (bytesPerSec < 1024) return Math.round(bytesPerSec) + ' B/s';
+  if (bytesPerSec < 1024 * 1024) return (bytesPerSec / 1024).toFixed(1) + ' KB/s';
+  return (bytesPerSec / (1024 * 1024)).toFixed(2) + ' MB/s';
+}
+
 function fapUpdateLiveClientTrafficDOM(inbounds) {
   if (!Array.isArray(inbounds)) return;
+  var now = Date.now();
   var clientMap = {};
   for (var i = 0; i < inbounds.length; i++) {
     var ib = inbounds[i] || {};
@@ -1938,28 +1948,41 @@ function fapUpdateLiveClientTrafficDOM(inbounds) {
   var rows = Array.from(document.querySelectorAll('tr, .client-row, .client-item, [data-client-email], [data-email]'));
   for (var r = 0; r < rows.length; r++) {
     var row = rows[r];
-    var rowKey = (row.getAttribute('data-client-email') || row.getAttribute('data-email') || row.getAttribute('data-client-id') || '').toLowerCase();
-    var matched = rowKey && clientMap[rowKey] ? clientMap[rowKey] : null;
-    if (!matched) {
-      var rowText = (row.textContent || '').toLowerCase();
-      for (var key in clientMap) {
-        if (key.includes('@') && rowText.includes(key)) {
-          matched = clientMap[key];
-          break;
-        }
+    var rowText = (row.textContent || '').toLowerCase();
+    var matched = null;
+    for (var key in clientMap) {
+      if (!Object.prototype.hasOwnProperty.call(clientMap, key)) continue;
+      if (rowText.includes(key)) {
+        matched = clientMap[key];
+        break;
       }
     }
     if (!matched) continue;
 
     var up = Number(matched.up || matched.upload || 0);
     var down = Number(matched.down || matched.download || 0);
+    var sampleKey = String(matched.id || matched.email || matched.uuid || '').toLowerCase();
+    var upRate = 0;
+    var downRate = 0;
+    if (sampleKey) {
+      var prev = fapPrevTrafficSample[sampleKey];
+      if (prev && now > prev.ts) {
+        var dtSec = (now - prev.ts) / 1000;
+        if (up >= prev.up) upRate = (up - prev.up) / dtSec;
+        if (down >= prev.down) downRate = (down - prev.down) / dtSec;
+      }
+      fapPrevTrafficSample[sampleKey] = { up: up, down: down, ts: now };
+    }
+
     var badge = row.querySelector('.fap-live-traffic-badge');
     if (!badge) {
       badge = document.createElement('span');
       badge.className = 'fap-live-traffic-badge';
       row.appendChild(badge);
     }
-    badge.textContent = '↑ ' + fapFmtBytesLive(up) + '  ↓ ' + fapFmtBytesLive(down);
+    badge.textContent =
+      '↑ ' + fapFmtBytesLive(up) + ' (' + fapFmtRateLive(upRate) + ')  ' +
+      '↓ ' + fapFmtBytesLive(down) + ' (' + fapFmtRateLive(downRate) + ')';
   }
 }
 
