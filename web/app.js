@@ -1974,14 +1974,39 @@ function fapUpdateLiveClientTrafficDOM(inbounds) {
       fapPrevTrafficSample[sampleKey] = { up: up, down: down, ts: now };
     }
 
-    var badge = row.querySelector('.fap-live-traffic-badge');
+    var targetCell = null;
+    var cells = Array.from(row.querySelectorAll('td, .traffic-cell, [data-col="traffic"]'));
+    for (var c = 0; c < cells.length; c++) {
+      var cText = (cells[c].textContent || '').trim();
+      if (/\b(\d+(\.\d+)?)\s*(B|KB|MB|GB|TB)\b/i.test(cText) || /traffic/i.test(cells[c].getAttribute('data-label') || '')) {
+        targetCell = cells[c];
+        break;
+      }
+    }
+    if (!targetCell) {
+      targetCell = cells.length >= 2 ? cells[cells.length - 2] : row;
+    }
+
+    var badge = targetCell.querySelector('.fap-live-traffic-badge');
     if (!badge) {
       badge = document.createElement('span');
       badge.className = 'fap-live-traffic-badge';
-      row.appendChild(badge);
+      badge.style.display = 'inline-flex';
+      badge.style.alignItems = 'center';
+      badge.style.gap = '6px';
+      badge.style.marginInlineStart = '8px';
+      badge.style.whiteSpace = 'nowrap';
+      badge.style.verticalAlign = 'middle';
+      badge.style.fontSize = '11.5px';
+      badge.style.lineHeight = '1.2';
+      badge.style.padding = '2px 7px';
+      badge.style.borderRadius = '6px';
+      badge.style.background = 'rgba(16, 185, 129, 0.12)';
+      badge.style.color = '#10b981';
+      targetCell.appendChild(badge);
     }
     badge.textContent =
-      '↑ ' + fapFmtBytesLive(up) + ' (' + fapFmtRateLive(upRate) + ')  ' +
+      '↑ ' + fapFmtBytesLive(up) + ' (' + fapFmtRateLive(upRate) + ') · ' +
       '↓ ' + fapFmtBytesLive(down) + ' (' + fapFmtRateLive(downRate) + ')';
   }
 }
