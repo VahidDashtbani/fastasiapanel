@@ -306,12 +306,58 @@ collect_user_configuration() {
     local db_choice
     tty_read "Select database (1: SQLite [default], 2: PostgreSQL): " db_choice "${DB_CHOICE:-1}"
     if [[ "${db_choice}" == "2" ]]; then
-        DB_TYPE="postgres"
-        tty_read "Enter PostgreSQL DSN (e.g. postgres://user:pass@127.0.0.1:5432/fastasiapanel?sslmode=disable): " DB_DSN "${DB_DSN:-}"
+        local pg_installed=0
+        if command -v psql >/dev/null 2>&1 || command -v pg_isready >/dev/null 2>&1 || systemctl list-unit-files 2>/dev/null | grep -q "^postgresql"; then
+            pg_installed=1
+        fi
+
+        if [[ "${pg_installed}" -eq 0 ]]; then
+            log_warn "PostgreSQL server/client was not detected on this machine."
+            echo "To use PostgreSQL, install it first (e.g. Debian/Ubuntu: apt-get update && apt-get install -y postgresql postgresql-contrib)"
+            echo "and create a database/user such as:"
+            echo "  su - postgres -c \"psql -c \\\"CREATE USER fastasiapanel WITH PASSWORD 'your_pass';\\\" -c \\\"CREATE DATABASE fastasiapanel OWNER fastasiapanel;\\\"\""
+            local install_pg_ans=""
+            tty_read "Install PostgreSQL automatically now? [y/N]: " install_pg_ans "n"
+            if [[ "${install_pg_ans}" =~ ^[Yy]$ ]] && command -v apt-get >/dev/null 2>&1; then
+                log_info "Installing PostgreSQL packages..."
+                apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql postgresql-contrib || true
+                systemctl enable --now postgresql 2>/dev/null || service postgresql start 2>/dev/null || true
+            fi
+        fi
+
+        local attempts=0
+        DB_DSN="${DB_DSN:-}"
+        while [[ -z "${DB_DSN}" && "${attempts}" -lt 3 ]]; do
+            attempts=$((attempts + 1))
+            echo "Example DSN: postgres://fastasiapanel:strong_password@127.0.0.1:5432/fastasiapanel?sslmode=disable"
+            tty_read "Enter PostgreSQL DSN (attempt ${attempts}/3, or press Enter to fall back to SQLite): " DB_DSN ""
+            if [[ -z "${DB_DSN}" && "${attempts}" -lt 3 ]]; then
+                log_warn "PostgreSQL DSN cannot be empty when PostgreSQL is selected."
+            fi
+        done
+
         if [[ -z "${DB_DSN}" ]]; then
-            log_warn "Empty PostgreSQL DSN provided; falling back to SQLite."
+            log_warn "No PostgreSQL DSN entered after ${attempts} attempts; falling back to SQLite (${CONFIG_DIR}/${APP_NAME}.db)."
             DB_TYPE="sqlite"
             DB_DSN="${CONFIG_DIR}/${APP_NAME}.db"
+        else
+            DB_TYPE="postgres"
+            if command -v psql >/dev/null 2>&1; then
+                if ! psql "${DB_DSN}" -c "SELECT 1;" >/dev/null 2>&1; then
+                    log_warn "Could not connect to PostgreSQL with the provided DSN. Check that PostgreSQL is running, credentials/port/host are valid, and the target database exists."
+                    local fallback_ans=""
+                    tty_read "Fall back to SQLite instead? [y/N]: " fallback_ans "n"
+                    if [[ "${fallback_ans}" =~ ^[Yy]$ ]]; then
+                        DB_TYPE="sqlite"
+                        DB_DSN="${CONFIG_DIR}/${APP_NAME}.db"
+                        log_info "Switched database to SQLite (${DB_DSN})."
+                    else
+                        log_warn "Keeping PostgreSQL DSN as entered; ensure PostgreSQL is reachable before starting the panel."
+                    fi
+                else
+                    log_info "PostgreSQL connection verified successfully."
+                fi
+            fi
         fi
     else
         DB_TYPE="sqlite"

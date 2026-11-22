@@ -2279,3 +2279,88 @@ setTimeout(function () {
   fapEnhanceClientModalFields();
   fapPollClientTrafficOneSecond();
 }, 250);
+
+// === FAP_RELEASE_NOTIFIER_START ===
+var FAP_CURRENT_VERSION = '1.1.4';
+var FAP_GITHUB_REPO = 'VahidDashtbani/fastasiapanel';
+
+function fapNormalizeVersion(v) {
+  return String(v || '').trim().replace(/^v/i, '');
+}
+
+function fapIsNewerVersion(latest, current) {
+  var a = fapNormalizeVersion(latest).split('.').map(function (n) { return parseInt(n, 10) || 0; });
+  var b = fapNormalizeVersion(current).split('.').map(function (n) { return parseInt(n, 10) || 0; });
+  var len = Math.max(a.length, b.length);
+  for (var i = 0; i < len; i++) {
+    var x = a[i] || 0;
+    var y = b[i] || 0;
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return false;
+}
+
+async function fapTriggerSelfUpdate() {
+  var btn = document.getElementById('fapUpdateNowBtn');
+  var statusEl = document.getElementById('fapUpdateStatusText');
+  if (btn) btn.disabled = true;
+  if (statusEl) statusEl.textContent = 'در حال اجرای آپدیت...';
+
+  try {
+    if (typeof fapCallAPI === 'function') {
+      await fapCallAPI('POST', 'api/update', { version: 'latest' });
+    } else {
+      var res = await fetch('api/update', { method: 'POST', credentials: 'same-origin' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+    }
+    if (statusEl) statusEl.textContent = 'آپدیت انجام شد؛ در حال بارگذاری مجدد...';
+    setTimeout(function () { window.location.reload(); }, 2500);
+  } catch (err) {
+    if (statusEl) statusEl.textContent = 'خطا در آپدیت خودکار: ' + (err && err.message ? err.message : err) + ' (از update.sh در سرور استفاده کنید)';
+    if (btn) btn.disabled = false;
+  }
+}
+
+function fapShowReleaseBanner(rel) {
+  if (!rel || !rel.tag_name) return;
+  if (!fapIsNewerVersion(rel.tag_name, FAP_CURRENT_VERSION)) return;
+  if (document.getElementById('fapReleaseUpdateBanner')) return;
+
+  var bar = document.createElement('div');
+  bar.id = 'fapReleaseUpdateBanner';
+  bar.style.cssText =
+    'position:fixed;bottom:16px;left:16px;right:16px;z-index:10050;max-width:760px;margin:0 auto;' +
+    'background:#0f172a;color:#f8fafc;border:1px solid #22c55e;border-radius:12px;' +
+    'padding:12px 16px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;' +
+    'box-shadow:0 12px 32px rgba(0,0,0,0.45);direction:rtl;font-family:inherit;';
+
+  bar.innerHTML =
+    '<div style="display:flex;flex-direction:column;gap:4px;">' +
+      '<strong style="color:#4ade80;">نسخه جدید ' + rel.tag_name + ' منتشر شد!</strong>' +
+      '<span id="fapUpdateStatusText" style="font-size:13px;color:#cbd5e1;">نسخه فعلی شما v' + FAP_CURRENT_VERSION + ' است. برای دریافت قابلیت‌ها و رفع باگ‌ها آپدیت کنید.</span>' +
+    '</div>' +
+    '<div style="display:flex;align-items:center;gap:8px;">' +
+      '<button type="button" id="fapUpdateNowBtn" style="background:#16a34a;color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;">آپدیت خودکار</button>' +
+      (rel.html_url ? '<a href="' + rel.html_url + '" target="_blank" rel="noopener" style="color:#93c5fd;font-size:13px;text-decoration:none;">مشاهده ریلیز</a>' : '') +
+      '<button type="button" id="fapDismissUpdateBtn" style="background:transparent;color:#94a3b8;border:1px solid #334155;border-radius:8px;padding:6px 10px;cursor:pointer;">بستن</button>' +
+    '</div>';
+
+  document.body.appendChild(bar);
+  document.getElementById('fapUpdateNowBtn').onclick = fapTriggerSelfUpdate;
+  document.getElementById('fapDismissUpdateBtn').onclick = function () { bar.remove(); };
+}
+
+async function fapCheckLatestRelease() {
+  try {
+    var url = 'https://api.github.com/repos/' + FAP_GITHUB_REPO + '/releases/latest';
+    var res = await fetch(url, { headers: { 'Accept': 'application/vnd.github+json' } });
+    if (!res.ok) return;
+    var data = await res.json();
+    fapShowReleaseBanner(data);
+  } catch (_) {}
+}
+
+setTimeout(fapCheckLatestRelease, 1500);
+setInterval(fapCheckLatestRelease, 3600000);
+// === FAP_RELEASE_NOTIFIER_END ===
