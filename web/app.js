@@ -262,22 +262,6 @@
       '</svg>';
   }
 
-  
-  function renderLiveSpeedRow(sArg, sysArg) {
-    var sObj = (typeof sArg !== 'undefined' && sArg) ? sArg : ((typeof state !== 'undefined' && state) ? state : {});
-    var sysObj = (typeof sysArg !== 'undefined' && sysArg) ? sysArg : ((sObj && sObj.sys) ? sObj.sys : {});
-    var upBps = Number(sysObj.net_up_speed ?? sysObj.up_speed ?? sObj.net_up_speed ?? sObj.up_speed ?? 0) || 0;
-    var downBps = Number(sysObj.net_down_speed ?? sysObj.down_speed ?? sObj.net_down_speed ?? sObj.down_speed ?? 0) || 0;
-    var upFmt = (typeof fmtBytes === 'function' ? fmtBytes(upBps) : upBps + ' B') + '/s';
-    var downFmt = (typeof fmtBytes === 'function' ? fmtBytes(downBps) : downBps + ' B') + '/s';
-
-    return '<div class="live-speed-inline num">' +
-      '<span class="live-speed-title">Live Speed</span>' +
-      '<span class="live-speed-up">↑ ' + esc(upFmt) + '</span>' +
-      '<span class="live-speed-down">↓ ' + esc(downFmt) + '</span>' +
-      '</div>';
-  }
-
   function renderDashboard() {
     topActions.innerHTML = '<div class="top-tools">' +
       '<button type="button" class="btn sec sm" id="dashRefreshBtn">Refresh Now</button>' +
@@ -414,6 +398,7 @@
         '<td class="num">' + esc(ib.listen || '0.0.0.0') + ':' + ib.port + '</td>' +
         '<td class="num">' + activeCount + ' / ' + clients.length + '</td>' +
         '<td class="num">' + fmtBytes((ib.up || 0) + (ib.down || 0)) + '</td>' +
+        '<td>' + formatClientSpeed(c) + '</td>' +
         '<td><div class="row-actions">' +
         '<button class="icon-btn" data-act="add-client" data-id="' + esc(ib.id) + '">+ Client</button>' +
         '<button class="icon-btn" data-act="view-clients" data-id="' + esc(ib.id) + '">Clients</button>' +
@@ -469,9 +454,7 @@
     }
 
     var html = '<div class="card" style="overflow-x:auto"><table><thead><tr>' +
-      '<th>Status</th><th>Email / Name</th><th>Inbound</th><th>Traffic Usage</th><th>Expiry</th><th>Limits / Quota</th><th>Actions</th>' +
-      renderLiveSpeedRow((typeof s !== 'undefined' ? s : null), (typeof sys !== 'undefined' ? sys : null)) +
-      '</tr></thead><tbody>';
+      '<th>Status</th><th>Email / Name</th><th>Inbound</th><th>Traffic Usage</th><th>Speed</th><th>Expiry</th><th>Limits / Quota</th><th>Actions</th>' +'</tr></thead><tbody>';
 
     rows.forEach(function (item) {
       var ib = item.ib;
@@ -513,6 +496,20 @@
     view.innerHTML = html;
     applyBars();
     if (keepScroll) window.scrollTo(0, y);
+  }
+
+  
+  function formatClientSpeed(c) {
+    c = c || {};
+    var up = Number(
+      c.up_speed ?? c.tx_speed ?? c.upload_speed ?? c.net_up_speed ?? c.speed_up ?? 0
+    ) || 0;
+    var down = Number(
+      c.down_speed ?? c.rx_speed ?? c.download_speed ?? c.net_down_speed ?? c.speed_down ?? 0
+    ) || 0;
+    var upStr = (typeof fmtBytes === 'function' ? fmtBytes(up) : up + ' B') + '/s';
+    var downStr = (typeof fmtBytes === 'function' ? fmtBytes(down) : down + ' B') + '/s';
+    return '<span class="client-speed num"><span class="sp-up">↑ ' + esc(upStr) + '</span> · <span class="sp-down">↓ ' + esc(downStr) + '</span></span>';
   }
 
   function renderClients(keepScroll) {
