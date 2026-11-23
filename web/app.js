@@ -263,11 +263,11 @@
   }
 
   
-  function renderLiveSpeedRow(s, sys) {
-    sys = sys || {};
-    s = s || {};
-    var upBps = Number(sys.net_up_speed ?? sys.up_speed ?? s.net_up_speed ?? s.up_speed ?? 0) || 0;
-    var downBps = Number(sys.net_down_speed ?? sys.down_speed ?? s.net_down_speed ?? s.down_speed ?? 0) || 0;
+  function renderLiveSpeedRow(sArg, sysArg) {
+    var sObj = (typeof sArg !== 'undefined' && sArg) ? sArg : ((typeof state !== 'undefined' && state) ? state : {});
+    var sysObj = (typeof sysArg !== 'undefined' && sysArg) ? sysArg : ((sObj && sObj.sys) ? sObj.sys : {});
+    var upBps = Number(sysObj.net_up_speed ?? sysObj.up_speed ?? sObj.net_up_speed ?? sObj.up_speed ?? 0) || 0;
+    var downBps = Number(sysObj.net_down_speed ?? sysObj.down_speed ?? sObj.net_down_speed ?? sObj.down_speed ?? 0) || 0;
     var upFmt = (typeof fmtBytes === 'function' ? fmtBytes(upBps) : upBps + ' B') + '/s';
     var downFmt = (typeof fmtBytes === 'function' ? fmtBytes(downBps) : downBps + ' B') + '/s';
 
@@ -470,7 +470,7 @@
 
     var html = '<div class="card" style="overflow-x:auto"><table><thead><tr>' +
       '<th>Status</th><th>Email / Name</th><th>Inbound</th><th>Traffic Usage</th><th>Expiry</th><th>Limits / Quota</th><th>Actions</th>' +
-      renderLiveSpeedRow(s, sys) +
+      renderLiveSpeedRow((typeof s !== 'undefined' ? s : null), (typeof sys !== 'undefined' ? sys : null)) +
       '</tr></thead><tbody>';
 
     rows.forEach(function (item) {
