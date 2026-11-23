@@ -358,25 +358,6 @@ func escHTML(s string) string {
 }
 
 
-func formatBytesEN(n int64) string {
-	if n < 0 {
-		n = 0
-	}
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	div, exp := int64(unit), 0
-	for val := n / unit; val >= unit; val /= unit {
-		div *= unit
-		exp++
-	}
-	suffixes := []string{"KB", "MB", "GB", "TB", "PB"}
-	if exp >= len(suffixes) {
-		exp = len(suffixes) - 1
-	}
-	return fmt.Sprintf("%.2f %s", float64(n)/float64(div), suffixes[exp])
-}
 
 ")
 	b.WriteString("function copyText(text,btn,doneLabel){if(!text)return;if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).catch(function(){});}else{var ta=document.createElement(\"textarea\");ta.value=text;document.body.appendChild(ta);ta.select();try{document.execCommand(\"copy\");}catch(_){}document.body.removeChild(ta);}var orig=btn.textContent;btn.textContent=doneLabel||\"Copied!\";setTimeout(function(){btn.textContent=orig;},1500);}")
