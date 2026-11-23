@@ -1,10 +1,10 @@
 package web
 
 import (
-	"github.com/skip2/go-qrcode"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/skip2/go-qrcode"
 	"io"
 	"io/fs"
 	"net"
@@ -66,8 +66,8 @@ type clientView struct {
 	Flow        string `json:"flow"`
 	Link        string `json:"link"`
 	SubURL      string `json:"sub_url"`
-	LiveUp   int64 `json:"live_up"`
-	LiveDown int64 `json:"live_down"`
+	LiveUp      int64  `json:"live_up"`
+	LiveDown    int64  `json:"live_down"`
 }
 
 type inboundView struct {
@@ -226,7 +226,6 @@ func (a *App) Handler() http.Handler {
 	b := a.cfg.BasePath
 	req := a.au.Require
 
-
 	mux.HandleFunc("GET "+b+"/{$}", a.index)
 	mux.HandleFunc("GET "+b+"/dashboard", a.index)
 	mux.HandleFunc("GET "+b+"/inbounds", a.index)
@@ -355,21 +354,6 @@ func escHTML(s string) string {
 		"\"", "&quot;",
 		"'", "&#39;",
 	).Replace(s)
-}
-
-
-
-")
-	b.WriteString("function copyText(text,btn,doneLabel){if(!text)return;if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).catch(function(){});}else{var ta=document.createElement(\"textarea\");ta.value=text;document.body.appendChild(ta);ta.select();try{document.execCommand(\"copy\");}catch(_){}document.body.removeChild(ta);}var orig=btn.textContent;btn.textContent=doneLabel||\"Copied!\";setTimeout(function(){btn.textContent=orig;},1500);}")
-	b.WriteString("var rawEl=document.getElementById(\"rawSubPayload\");var configs=decodeRaw(rawEl?rawEl.textContent:\"\");var cfgListEl=document.getElementById(\"cfgList\");var cfgCountEl=document.getElementById(\"cfgCount\");if(cfgCountEl)cfgCountEl.textContent=String(configs.length);")
-	b.WriteString("var qrBox=document.getElementById(\"qrBox\"),qrTitle=document.getElementById(\"qrTitle\"),qrVisual=document.getElementById(\"qrVisual\"),qrPayloadText=document.getElementById(\"qrPayloadText\");")
-	b.WriteString("function showQr(label,payload){if(!payload)return;qrTitle.textContent=label;qrVisual.innerHTML=buildOfflineQrSvg(payload,196);qrPayloadText.textContent=payload;qrBox.classList.add(\"open\");qrBox.scrollIntoView({behavior:\"smooth\",block:\"nearest\"});}")
-	b.WriteString("if(!configs.length){cfgListEl.innerHTML=\"<div class=\\\"cfg-item\\\" style=\\\"color:var(--mut)\\\">No decoded configs available.</div>\";}else{configs.forEach(function(uri,i){var card=document.createElement(\"div\");card.className=\"cfg-item\";var top=document.createElement(\"div\");top.className=\"cfg-top\";var titleSpan=document.createElement(\"span\");titleSpan.className=\"cfg-name\";titleSpan.textContent=parseConfigLabel(uri,i);var actions=document.createElement(\"div\");actions.style.display=\"flex\";actions.style.gap=\"6px\";var copyBtn=document.createElement(\"button\");copyBtn.type=\"button\";copyBtn.className=\"sec\";copyBtn.textContent=\"Copy\";copyBtn.addEventListener(\"click\",function(){copyText(uri,copyBtn,\"Copied!\");});var qrBtn=document.createElement(\"button\");qrBtn.type=\"button\";qrBtn.className=\"sec\";qrBtn.textContent=\"QR\";qrBtn.addEventListener(\"click\",function(){showQr(parseConfigLabel(uri,i),uri);});actions.appendChild(copyBtn);actions.appendChild(qrBtn);top.appendChild(titleSpan);top.appendChild(actions);var uriBox=document.createElement(\"div\");uriBox.className=\"cfg-uri\";uriBox.textContent=uri;card.appendChild(top);card.appendChild(uriBox);cfgListEl.appendChild(card);});}")
-	b.WriteString("document.getElementById(\"copySubBtn\").addEventListener(\"click\",function(){copyText(document.getElementById(\"subUrlText\").textContent.trim(),this,\"Copied!\");});")
-	b.WriteString("document.getElementById(\"copyAllBtn\").addEventListener(\"click\",function(){copyText(configs.join(\"\\n\"),this,\"All Copied!\");});")
-	b.WriteString("document.getElementById(\"qrSubBtn\").addEventListener(\"click\",function(){showQr(\"Subscription QR\",document.getElementById(\"subUrlText\").textContent.trim());});")
-	b.WriteString("})();</script></body></html>")
-	return b.String()
 }
 
 func (a *App) subscription(w http.ResponseWriter, r *http.Request) {
