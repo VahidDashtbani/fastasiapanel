@@ -398,7 +398,7 @@
         '<td class="num">' + esc(ib.listen || '0.0.0.0') + ':' + ib.port + '</td>' +
         '<td class="num">' + activeCount + ' / ' + clients.length + '</td>' +
         '<td class="num">' + fmtBytes((ib.up || 0) + (ib.down || 0)) + '</td>' +
-        '<td>' + formatClientSpeed(c) + '</td>' +
+        '<td>'+ '</td>' +
         '<td><div class="row-actions">' +
         '<button class="icon-btn" data-act="add-client" data-id="' + esc(ib.id) + '">+ Client</button>' +
         '<button class="icon-btn" data-act="view-clients" data-id="' + esc(ib.id) + '">Clients</button>' +
