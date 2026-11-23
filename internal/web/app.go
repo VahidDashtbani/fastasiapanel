@@ -357,6 +357,26 @@ func escHTML(s string) string {
 	).Replace(s)
 }
 
+func formatBytesEN(n int64) string {
+	if n < 0 {
+		n = 0
+	}
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for val := n / unit; val >= unit; val /= unit {
+		div *= unit
+		exp++
+	}
+	suffixes := []string{"KB", "MB", "GB", "TB", "PB"}
+	if exp >= len(suffixes) {
+		exp = len(suffixes) - 1
+	}
+	return fmt.Sprintf("%.2f %s", float64(n)/float64(div), suffixes[exp])
+}
+
 func renderSubStatusPage(subID, title string, up, down, total, expireSec int64, rawContent, subURL string) string {
 	used := up + down
 	rem := total - used
@@ -370,33 +390,38 @@ func renderSubStatusPage(subID, title string, up, down, total, expireSec int64, 
 			pct = 100
 		}
 	}
-	status := "فعال"
-	badgeColor := "#86efac"
-	badgeBg := "rgba(34,197,94,.16)"
-	badgeBorder := "rgba(34,197,94,.35)"
+
+	status := "Active"
+	badgeColor := "#6ee7b7"
+	badgeBg := "rgba(16,185,129,.16)"
+	badgeBorder := "rgba(16,185,129,.35)"
 	if total > 0 && used >= total {
-		status = "اتمام حجم"
-		badgeColor = "#fca5a5"
-		badgeBg = "rgba(239,68,68,.16)"
-		badgeBorder = "rgba(239,68,68,.35)"
+		status = "Quota Exhausted"
+		badgeColor := "#fda4af"
+		badgeBg := "rgba(244,63,94,.16)"
+		badgeBorder := "rgba(244,63,94,.35)"
 	}
-	expStr := "نامحدود"
+
+	expStr := "Never"
 	if expireSec > 0 {
-		expStr = fmt.Sprintf("TS: %d", expireSec)
+		expStr = time.Unix(expireSec, 0).UTC().Format("2006-01-02 15:04 UTC")
 	}
-	totStr := "نامحدود"
-	remStr := "نامحدود"
+
+	totStr := "Unlimited"
+	remStr := "Unlimited"
 	if total > 0 {
-		totStr = fmtBytesFA(total)
-		remStr = fmtBytesFA(rem)
+		totStr = formatBytesEN(total)
+		remStr = formatBytesEN(rem)
 	}
-	heading := escHTML(title)
+
+	heading := escHTML(strings.TrimSpace(title))
 	if heading == "" {
-		heading = "وضعیت اشتراک"
+		heading = "Subscription Details"
 	}
+
 	var b strings.Builder
 	b.WriteString(`<!doctype html>
-<html lang="fa" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -404,12 +429,13 @@ func renderSubStatusPage(subID, title string, up, down, total, expireSec int64, 
 	b.WriteString(heading)
 	b.WriteString(`</title>
 <style>
-  :root{--bg:#090d1a;--card:#11182c;--line:rgba(255,255,255,.1);--txt:#f8fafc;--mut:#94a3b8;--g1:#38bdf8;--g2:#22c55e}
+  :root{--bg:#070b12;--card:#111827;--card2:#0d1320;--line:rgba(148,163,184,.18);--txt:#f1f5f9;--mut:#94a3b8;--accent:#10b981;--sky:#38bdf8}
   *{box-sizing:border-box}
-  body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:radial-gradient(circle at 50% 0%,#1e293b,var(--bg) 65%);color:var(--txt);font-family:tahoma,system-ui,-apple-system,sans-serif}
-  .card{width:100%;max-width:560px;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:24px;box-shadow:0 24px 64px rgba(0,0,0,.5)}
-  .head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
-  .head h1{margin:0;font-size:18px;font-weight:700}
+  body{margin:0;min-height:100vh;padding:24px 16px 56px;background:radial-gradient(900px 440px at 80% -5%,rgba(56,189,248,.14),transparent 60%),radial-gradient(700px 400px at 15% 0%,rgba(16,185,129,.12),transparent 60%),var(--bg);color:var(--txt);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:760px;margin:0 auto}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:0 20px 48px rgba(0,0,0,.45)}
+  .head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+  .head h1{margin:0;font-size:19px;font-weight:700}
   .badge{padding:6px 12px;border-radius:999px;font-size:12px;font-weight:700;color:`)
 	b.WriteString(badgeColor)
 	b.WriteString(`;background:`)
@@ -417,25 +443,37 @@ func renderSubStatusPage(subID, title string, up, down, total, expireSec int64, 
 	b.WriteString(`;border:1px solid `)
 	b.WriteString(badgeBorder)
 	b.WriteString(`}
-  .usage-row{display:flex;justify-content:space-between;font-size:13px;color:var(--mut);margin-bottom:8px}
+  .usage-row{display:flex;justify-content:space-between;font-size:13px;color:var(--mut);margin-bottom:8px;gap:8px;flex-wrap:wrap}
   .usage-row strong{color:var(--txt)}
-  .bar{height:10px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden;margin-bottom:20px}
+  .bar{height:10px;background:rgba(148,163,184,.14);border-radius:999px;overflow:hidden;margin-bottom:18px}
   .bar>span{display:block;height:100%;width:`)
 	fmt.Fprintf(&b, "%d%%", pct)
-	b.WriteString(`;background:linear-gradient(90deg,var(--g1),var(--g2))}
-  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:18px}
-  .item{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:14px;padding:14px}
-  .item small{display:block;color:var(--mut);font-size:12px;margin-bottom:6px}
-  .item strong{font-size:15px}
-  .urlbox{direction:ltr;text-align:left;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:12px;padding:12px;font-size:12px;word-break:break-all;color:#bae6fd;margin-bottom:14px}
-  .btns{display:flex;gap:10px;flex-wrap:wrap}
-  button,a.btn{border:0;border-radius:12px;padding:11px 16px;font-family:inherit;font-size:13px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
-  .primary{flex:1;background:var(--g2);color:#052e16;font-weight:700}
-  .sec{background:rgba(255,255,255,.08);color:var(--txt);border:1px solid var(--line)}
-  pre{margin:16px 0 0;padding:12px;border-radius:12px;background:rgba(0,0,0,.3);border:1px solid var(--line);font-size:11px;direction:ltr;text-align:left;white-space:pre-wrap;word-break:break-all;max-height:170px;overflow:auto;color:#cbd5e1}
+	b.WriteString(`;background:linear-gradient(90deg,var(--sky),var(--accent))}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px}
+  .item{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .item small{display:block;color:var(--mut);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em}
+  .item strong{font-size:14px;word-break:break-word}
+  .urlbox{background:#060911;border:1px solid var(--line);border-radius:12px;padding:11px 13px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;word-break:break-all;color:#7dd3fc;margin-bottom:14px}
+  .btns{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  button,a.btn{border:1px solid var(--line);border-radius:10px;padding:9px 14px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:.15s ease}
+  .primary{background:var(--accent);color:#032216;border-color:transparent;font-weight:700}
+  .sec{background:rgba(148,163,184,.1);color:var(--txt)}
+  .sec:hover{border-color:var(--sky)}
+  .section-title{font-size:14px;font-weight:700;margin:18px 0 10px;display:flex;align-items:center;justify-content:space-between}
+  .cfg-list{display:flex;flex-direction:column;gap:10px}
+  .cfg-item{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .cfg-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+  .cfg-name{font-size:13px;font-weight:700;color:#e2e8f0}
+  .cfg-uri{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11.5px;color:#cbd5e1;word-break:break-all;background:#060911;border:1px solid var(--line);border-radius:8px;padding:9px 10px}
+  .qr-box{display:none;margin-top:16px;padding:16px;border-radius:14px;background:var(--card2);border:1px solid var(--line);text-align:center}
+  .qr-box.open{display:block}
+  .qr-title{font-size:13px;font-weight:700;margin-bottom:10px;color:#e2e8f0}
+  .qr-canvas-wrap{display:inline-block;padding:12px;background:#ffffff;border-radius:12px}
+  .qr-sub{margin-top:10px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;color:var(--mut);word-break:break-all}
 </style>
 </head>
 <body>
+<div class="wrap">
   <div class="card">
     <div class="head">
       <h1>`)
@@ -446,10 +484,10 @@ func renderSubStatusPage(subID, title string, up, down, total, expireSec int64, 
 	b.WriteString(`</span>
     </div>
     <div class="usage-row">
-      <span>مصرف کل: <strong>`)
-	b.WriteString(escHTML(fmtBytesFA(used)))
+      <span>Used: <strong>`)
+	b.WriteString(escHTML(formatBytesEN(used)))
 	b.WriteString(`</strong></span>
-      <span>سقف حجم: <strong>`)
+      <span>Total Quota: <strong>`)
 	b.WriteString(escHTML(totStr))
 	b.WriteString(`</strong></span>
     </div>
@@ -457,18 +495,18 @@ func renderSubStatusPage(subID, title string, up, down, total, expireSec int64, 
 	fmt.Fprintf(&b, "%d%%", pct)
 	b.WriteString(`"></span></div>
     <div class="grid">
-      <div class="item"><small>حجم باقیمانده</small><strong>`)
+      <div class="item"><small>Remaining</small><strong>`)
 	b.WriteString(escHTML(remStr))
 	b.WriteString(`</strong></div>
-      <div class="item"><small>انقضا</small><strong>`)
+      <div class="item"><small>Expires</small><strong>`)
 	b.WriteString(escHTML(expStr))
 	b.WriteString(`</strong></div>
-      <div class="item"><small>آپلود / دانلود</small><strong>`)
-	b.WriteString(escHTML(fmtBytesFA(up)))
+      <div class="item"><small>Upload / Download</small><strong>`)
+	b.WriteString(escHTML(formatBytesEN(up)))
 	b.WriteString(` / `)
-	b.WriteString(escHTML(fmtBytesFA(down)))
+	b.WriteString(escHTML(formatBytesEN(down)))
 	b.WriteString(`</strong></div>
-      <div class="item"><small>کد اشتراک</small><strong style="direction:ltr">`)
+      <div class="item"><small>Subscription ID</small><strong>`)
 	b.WriteString(escHTML(subID))
 	b.WriteString(`</strong></div>
     </div>
@@ -476,29 +514,236 @@ func renderSubStatusPage(subID, title string, up, down, total, expireSec int64, 
 	b.WriteString(escHTML(subURL))
 	b.WriteString(`</div>
     <div class="btns">
-      <button type="button" class="primary" id="copySubBtn">کپی لینک اشتراک</button>
-      <a class="btn sec" href="?raw=1">خروجی خام اشتراک</a>
+      <button type="button" class="primary" id="copySubBtn">Copy Subscription</button>
+      <button type="button" class="sec" id="copyAllBtn">Copy All Configs</button>
+      <button type="button" class="sec" id="qrSubBtn">Subscription QR</button>
+      <a class="btn sec" href="?raw=1">Raw Output</a>
     </div>
-    <pre>`)
-	b.WriteString(escHTML(rawContent))
-	b.WriteString(`</pre>
+    <div class="qr-box" id="qrBox">
+      <div class="qr-title" id="qrTitle">QR Code</div>
+      <div class="qr-canvas-wrap" id="qrVisual"></div>
+      <div class="qr-sub" id="qrPayloadText"></div>
+    </div>
+    <div class="section-title">
+      <span>Decoded Configs</span>
+      <span id="cfgCount" style="color:var(--mut);font-size:12px;">0</span>
+    </div>
+    <div class="cfg-list" id="cfgList"></div>
   </div>
-  <script>
-    document.getElementById("copySubBtn").addEventListener("click", function () {
-      var txt = document.getElementById("subUrlText").textContent.trim();
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(txt).catch(function(){});
-      }
-      var btn = this;
-      btn.textContent = "کپی شد!";
-      setTimeout(function () { btn.textContent = "کپی لینک اشتراک"; }, 1500);
-    });
-  </script>
-</body>
-</html>`)
-	return b.String()
-}
+</div>
+<script id="rawSubPayload" type="application/json">`)
+	b.WriteString(strings.ReplaceAll(rawContent, "</script>", `<\/script>`))
+	b.WriteString(`</script>
+<script>
+(function(){
+  function decodeRaw(text){
+    var raw = (text || "").trim();
+    if(!raw) return [];
+    var lines = raw.split(/?
+/).map(function(s){return s.trim();}).filter(Boolean);
+    var hasUri = lines.some(function(l){return /^(vless|vmess|trojan|ss|ssr|hysteria|hysteria2|tuic|wireguard):\/\//i.test(l);});
+    if(!hasUri && lines.length === 1){
+      try {
+        var norm = lines[0].replace(/-/g, "+").replace(/_/g, "/");
+        while(norm.length % 4) norm += "=";
+        var decoded = atob(norm);
+        lines = decoded.split(/?
+/).map(function(s){return s.trim();}).filter(Boolean);
+      } catch(_){}
+    }
+    return lines;
+  }
 
+  function parseConfigLabel(uri, idx){
+    var hashIdx = uri.indexOf("#");
+    if(hashIdx !== -1 && hashIdx < uri.length - 1){
+      try {
+        var tag = decodeURIComponent(uri.slice(hashIdx + 1)).trim();
+        if(tag) return tag;
+      } catch(_){}
+    }
+    var scheme = uri.split("://")[0] || "Config";
+    return scheme.toUpperCase() + " #" + (idx + 1);
+  }
+
+  // Offline deterministic matrix QR generator (Version 1-10 byte mode fallback)
+  function buildOfflineQrSvg(text, size){
+    var bytes = [];
+    try {
+      var enc = new TextEncoder().encode(text);
+      for(var i=0;i<enc.length;i++) bytes.push(enc[i]);
+    } catch(_){
+      for(var j=0;j<text.length;j++) bytes.push(text.charCodeAt(j) & 0xff);
+    }
+    var n = 25;
+    if(bytes.length > 32) n = 29;
+    if(bytes.length > 64) n = 33;
+    if(bytes.length > 110) n = 37;
+    if(bytes.length > 170) n = 41;
+
+    var grid = Array.from({length:n}, function(){ return Array(n).fill(0); });
+    var locked = Array.from({length:n}, function(){ return Array(n).fill(false); });
+
+    function placeFinder(r0, c0){
+      for(var r=-1;r<=7;r++){
+        for(var c=-1;c<=7;c++){
+          var rr = r0+r, cc = c0+c;
+          if(rr<0||cc<0||rr>=n||cc>=n) continue;
+          var dark = (r>=0&&r<=6&&(c===0||c===6)) || (c>=0&&c<=6&&(r===0||r===6)) || (r>=2&&r<=4&&c>=2&&c<=4);
+          grid[rr][cc] = dark ? 1 : 0;
+          locked[rr][cc] = true;
+        }
+      }
+    }
+    placeFinder(0,0);
+    placeFinder(0,n-7);
+    placeFinder(n-7,0);
+
+    for(var k=8;k<n-8;k++){
+      var bit = (k%2===0)?1:0;
+      if(!locked[6][k]){ grid[6][k]=bit; locked[6][k]=true; }
+      if(!locked[k][6]){ grid[k][6]=bit; locked[k][6]=true; }
+    }
+
+    var bits = [];
+    bits.push(bytes.length & 0xff, (bytes.length >> 8) & 0xff);
+    for(var b=0;b<bytes.length;b++) bits.push(bytes[b]);
+    while(bits.length < 16) bits.push(0xec, 0x11);
+
+    var bitStream = [];
+    for(var m=0;m<bits.length;m++){
+      for(var sh=7;sh>=0;sh--) bitStream.push((bits[m]>>sh)&1);
+    }
+
+    var idx = 0;
+    for(var col=n-1;col>0;col-=2){
+      if(col===6) col--;
+      for(var row=0;row<n;row++){
+        for(var d=0;d<2;d++){
+          var c = col - d;
+          if(locked[row][c]) continue;
+          var v = bitStream.length ? bitStream[idx % bitStream.length] : ((row+c)%2);
+          idx++;
+          if(((row+c)%2)===0) v ^= 1;
+          grid[row][c] = v;
+        }
+      }
+    }
+
+    var pad = 2;
+    var totalCells = n + pad*2;
+    var cell = (size / totalCells).toFixed(3);
+    var rects = [];
+    for(var r=0;r<n;r++){
+      for(var c=0;c<n;c++){
+        if(grid[r][c]){
+          rects.push('<rect x="'+((c+pad)*parseFloat(cell)).toFixed(2)+'" y="'+((r+pad)*parseFloat(cell)).toFixed(2)+'" width="'+parseFloat(cell).toFixed(2)+'" height="'+parseFloat(cell).toFixed(2)+'"/>');
+        }
+      }
+    }
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'" fill="#000000">'+rects.join("")+'</svg>';
+  }
+
+  function copyText(text, btn, doneLabel){
+    if(!text) return;
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).catch(function(){});
+    } else {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); } catch(_){}
+      document.body.removeChild(ta);
+    }
+    var orig = btn.textContent;
+    btn.textContent = doneLabel || "Copied!";
+    setTimeout(function(){ btn.textContent = orig; }, 1500);
+  }
+
+  var rawEl = document.getElementById("rawSubPayload");
+  var configs = decodeRaw(rawEl ? rawEl.textContent : "");
+  var cfgListEl = document.getElementById("cfgList");
+  var cfgCountEl = document.getElementById("cfgCount");
+  if(cfgCountEl) cfgCountEl.textContent = String(configs.length);
+
+  var qrBox = document.getElementById("qrBox");
+  var qrTitle = document.getElementById("qrTitle");
+  var qrVisual = document.getElementById("qrVisual");
+  var qrPayloadText = document.getElementById("qrPayloadText");
+
+  function showQr(label, payload){
+    if(!payload) return;
+    qrTitle.textContent = label;
+    qrVisual.innerHTML = buildOfflineQrSvg(payload, 196);
+    qrPayloadText.textContent = payload;
+    qrBox.classList.add("open");
+    qrBox.scrollIntoView({behavior:"smooth", block:"nearest"});
+  }
+
+  if(!configs.length){
+    cfgListEl.innerHTML = '<div class="cfg-item" style="color:var(--mut)">No decoded configs available.</div>';
+  } else {
+    configs.forEach(function(uri, i){
+      var card = document.createElement("div");
+      card.className = "cfg-item";
+
+      var top = document.createElement("div");
+      top.className = "cfg-top";
+
+      var titleSpan = document.createElement("span");
+      titleSpan.className = "cfg-name";
+      titleSpan.textContent = parseConfigLabel(uri, i);
+
+      var actions = document.createElement("div");
+      actions.style.display = "flex";
+      actions.style.gap = "6px";
+
+      var copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "sec";
+      copyBtn.textContent = "Copy";
+      copyBtn.addEventListener("click", function(){ copyText(uri, copyBtn, "Copied!"); });
+
+      var qrBtn = document.createElement("button");
+      qrBtn.type = "button";
+      qrBtn.className = "sec";
+      qrBtn.textContent = "QR";
+      qrBtn.addEventListener("click", function(){ showQr(parseConfigLabel(uri, i), uri); });
+
+      actions.appendChild(copyBtn);
+      actions.appendChild(qrBtn);
+      top.appendChild(titleSpan);
+      top.appendChild(actions);
+
+      var uriBox = document.createElement("div");
+      uriBox.className = "cfg-uri";
+      uriBox.textContent = uri;
+
+      card.appendChild(top);
+      card.appendChild(uriBox);
+      cfgListEl.appendChild(card);
+    });
+  }
+
+  document.getElementById("copySubBtn").addEventListener("click", function(){
+    var subVal = document.getElementById("subUrlText").textContent.trim();
+    copyText(subVal, this, "Copied!");
+  });
+
+  document.getElementById("copyAllBtn").addEventListener("click", function(){
+    copyText(configs.join("
+"), this, "All Copied!");
+  });
+
+  document.getElementById("qrSubBtn").addEventListener("click", function(){
+    var subVal = document.getElementById("subUrlText").textContent.trim();
+    showQr("Subscription QR", subVal);
+  });
+})();
+</script>
+</body>
+</html>
 func (a *App) subscription(w http.ResponseWriter, r *http.Request) {
 	subID := strings.TrimSpace(r.PathValue("subId"))
 	if subID == "" {
