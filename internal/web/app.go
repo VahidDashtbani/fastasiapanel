@@ -187,7 +187,11 @@ func (a *App) secure(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		scriptSrc := "'self'"
+		if strings.Contains(r.URL.Path, "/sub/") {
+			scriptSrc = "'self' 'unsafe-inline'"
+		}
+		h.Set("Content-Security-Policy", fmt.Sprintf("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src %s; frame-ancestors 'none'; base-uri 'none'; form-action 'self'", scriptSrc))
 		if a.cfg.SecureCookies {
 			h.Set("Strict-Transport-Security", "max-age=31536000")
 		}
