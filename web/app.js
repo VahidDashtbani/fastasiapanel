@@ -467,7 +467,7 @@
       var liveSub = '<div class="sub num" data-cl-ud="' + esc(c.id || c.email || '') + '">&uarr; ' + fmtBytes(c.live_up || 0) + '/s &middot; &darr; ' + fmtBytes(c.live_down || 0) + '/s</div>';
       var usage = (c.total_bytes > 0
         ? '<span class="bar ' + barCls + '"><i data-pct="' + pct + '"></i></span><span class="num" data-cl-total="' + esc(c.id || c.email || '') + '">' + fmtBytes(used) + ' / ' + fmtBytes(c.total_bytes) + '</span>'
-        : '<span class="num" data-cl-total="' + esc(c.id || c.email || '') + '">' + fmtBytes(used) + '</span> <span class="tag soft">Unlimited</span>') + liveSub;
+        : '<span class="num" data-cl-total="' + esc(c.id || c.email || '') + '">' + fmtBytes(used) + '</span> <span class="tag soft">Unlimited</span>') ;
       var ex = expiryInfo(c);
       var limits = [];
       if (c.limit_ip > 0) limits.push('IP: ' + c.limit_ip);
@@ -480,6 +480,7 @@
         '<td><span class="dot ' + (c.online ? 'ok' : '') + '" title="' + (c.online ? 'Online' : 'Offline') + '"></span><b>' + esc(c.email) + '</b>' + (c.comment ? '<span class="comment-sub">' + esc(c.comment) + '</span>' : '') + '</td>' +
         '<td><span class="tag soft">' + esc(ib.remark || ib.tag) + ' (' + esc(ib.protocol.toUpperCase()) + ')</span></td>' +
         '<td>' + usage + '</td>' +
+        renderClientSpeedCell(c) +
         '<td><span class="tag ' + ex.cls + '">' + ex.text + '</span></td>' +
         '<td>' + (limits.length ? '<span class="tag soft">' + esc(limits.join(' · ')) + '</span>' : '<span class="tag soft">-</span>') + '</td>' +
         '<td><div class="row-actions">' +
@@ -499,6 +500,17 @@
   }
 
   
+    function renderClientSpeedCell(c) {
+    c = c || {};
+    var up = Number(c.live_up ?? c.up_speed ?? c.tx_speed ?? c.upload_speed ?? 0) || 0;
+    var down = Number(c.live_down ?? c.down_speed ?? c.rx_speed ?? c.download_speed ?? 0) || 0;
+    var upStr = (typeof fmtBytes === 'function' ? fmtBytes(up) : up + ' B') + '/s';
+    var downStr = (typeof fmtBytes === 'function' ? fmtBytes(down) : down + ' B') + '/s';
+    return '<td class="num" data-cl-ud="' + esc(c.id || c.email || '') + '">' +
+      '<span class="client-speed"><span class="sp-up">&uarr; ' + esc(upStr) + '</span> &middot; <span class="sp-down">&darr; ' + esc(downStr) + '</span></span>' +
+      '</td>';
+  }
+
   function formatClientSpeed(c) {
     c = c || {};
     var up = Number(
