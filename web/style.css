@@ -489,12 +489,130 @@ tbody tr:hover {
 .traffic-axis { fill: rgba(148, 163, 184, 0.75); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 
+
+/* === Responsive Compact Client Table & Cards === */
+.card table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.card th,
+.card td {
+  padding: 8px 10px;
+  vertical-align: middle;
+}
+
+.card th {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  opacity: 0.82;
+  white-space: nowrap;
+}
+
 .client-speed {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 12px;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  font-size: 11.5px;
+  line-height: 1.2;
   white-space: nowrap;
 }
-.client-speed .sp-up { color: #38bdf8; font-weight: 600; }
-.client-speed .sp-down { color: #22c55e; font-weight: 600; }
+
+.client-speed .sp-up {
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+.client-speed .sp-down {
+  color: #22c55e;
+  font-weight: 600;
+}
+
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.row-actions .icon-btn {
+  padding: 4px 7px;
+  font-size: 11px;
+  line-height: 1.2;
+  border-radius: 6px;
+}
+
+@media (max-width: 900px) {
+  .card[style*="overflow-x:auto"] {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .card table,
+  .card thead,
+  .card tbody,
+  .card tr,
+  .card th,
+  .card td {
+    display: block;
+    width: 100%;
+  }
+
+  .card thead {
+    display: none;
+  }
+
+  .card tbody tr {
+    background: rgba(15, 23, 42, 0.52);
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 12px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+
+  .card tbody td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 5px 2px;
+    border-bottom: 1px dashed rgba(148, 163, 184, 0.1);
+    text-align: right;
+    font-size: 12px;
+  }
+
+  .card tbody td:last-child {
+    border-bottom: none;
+    padding-top: 8px;
+    justify-content: flex-end;
+  }
+
+  .card tbody td::before {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(148, 163, 184, 0.8);
+    text-align: left;
+    flex-shrink: 0;
+  }
+
+  .card tbody td:last-child::before {
+    display: none;
+  }
+
+  .row-actions {
+    width: 100%;
+    justify-content: flex-end;
+    gap: 5px;
+  }
+}
+/* === End Responsive Compact Client Table & Cards === */

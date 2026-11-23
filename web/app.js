@@ -479,7 +479,7 @@
         '<td><button class="switch sm ' + (c.enable ? 'on' : '') + '" data-act="toggle-client" data-cid="' + esc(c.id) + '"></button></td>' +
         '<td><span class="dot ' + (c.online ? 'ok' : '') + '" title="' + (c.online ? 'Online' : 'Offline') + '"></span><b>' + esc(c.email) + '</b>' + (c.comment ? '<span class="comment-sub">' + esc(c.comment) + '</span>' : '') + '</td>' +
         '<td><span class="tag soft">' + esc(ib.remark || ib.tag) + ' (' + esc(ib.protocol.toUpperCase()) + ')</span></td>' +
-        '<td>' + usage + '</td>' +
+        '<td data-label=\"Traffic Usage\">' + usage + '</td>' +
         renderClientSpeedCell(c) +
         '<td><span class="tag ' + ex.cls + '">' + ex.text + '</span></td>' +
         '<td>' + (limits.length ? '<span class="tag soft">' + esc(limits.join(' · ')) + '</span>' : '<span class="tag soft">-</span>') + '</td>' +
@@ -506,7 +506,7 @@
     var down = Number(c.live_down ?? c.down_speed ?? c.rx_speed ?? c.download_speed ?? 0) || 0;
     var upStr = (typeof fmtBytes === 'function' ? fmtBytes(up) : up + ' B') + '/s';
     var downStr = (typeof fmtBytes === 'function' ? fmtBytes(down) : down + ' B') + '/s';
-    return '<td class="num" data-cl-ud="' + esc(c.id || c.email || '') + '">' +
+    return '<td class="num" data-label="Speed" data-cl-ud="' + esc(c.id || c.email || '') + '">' +
       '<span class="client-speed"><span class="sp-up">&uarr; ' + esc(upStr) + '</span> &middot; <span class="sp-down">&darr; ' + esc(downStr) + '</span></span>' +
       '</td>';
   }
