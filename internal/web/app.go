@@ -532,14 +532,15 @@ func renderSubStatusPage(subID, title string, up, down, total, expireSec int64, 
   </div>
 </div>
 <script id="rawSubPayload" type="application/json">`)
-	b.WriteString(strings.ReplaceAll(rawContent, "</script>", `<\/script>`))
+	b.WriteString(strings.ReplaceAll(rawContent, "</script>", "<\\/script>"))
 	b.WriteString(`</script>
 <script>
 (function(){
   function decodeRaw(text){
     var raw = (text || "").trim();
     if(!raw) return [];
-    var lines = raw.split(/?
+    var lines = raw.split(/
+?
 /).map(function(s){return s.trim();}).filter(Boolean);
     var hasUri = lines.some(function(l){return /^(vless|vmess|trojan|ss|ssr|hysteria|hysteria2|tuic|wireguard):\/\//i.test(l);});
     if(!hasUri && lines.length === 1){
@@ -547,7 +548,8 @@ func renderSubStatusPage(subID, title string, up, down, total, expireSec int64, 
         var norm = lines[0].replace(/-/g, "+").replace(/_/g, "/");
         while(norm.length % 4) norm += "=";
         var decoded = atob(norm);
-        lines = decoded.split(/?
+        lines = decoded.split(/
+?
 /).map(function(s){return s.trim();}).filter(Boolean);
       } catch(_){}
     }
