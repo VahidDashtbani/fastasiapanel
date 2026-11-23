@@ -487,3 +487,18 @@ tbody tr:hover {
 .traffic-svg { width: 100%; height: 150px; display: block; border-radius: 8px; background: rgba(15, 23, 42, 0.35); }
 .traffic-grid { stroke: rgba(148, 163, 184, 0.16); stroke-dasharray: 3 3; stroke-width: 1; }
 .traffic-axis { fill: rgba(148, 163, 184, 0.75); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.live-speed-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.35);
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.live-speed-title { color: rgba(148, 163, 184, 0.85); font-size: 11.5px; }
+.live-speed-up { color: #38bdf8; font-weight: 600; }
+.live-speed-down { color: #22c55e; font-weight: 600; }

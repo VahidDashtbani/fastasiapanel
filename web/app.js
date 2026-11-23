@@ -262,6 +262,22 @@
       '</svg>';
   }
 
+  
+  function renderLiveSpeedRow(s, sys) {
+    sys = sys || {};
+    s = s || {};
+    var upBps = Number(sys.net_up_speed ?? sys.up_speed ?? s.net_up_speed ?? s.up_speed ?? 0) || 0;
+    var downBps = Number(sys.net_down_speed ?? sys.down_speed ?? s.net_down_speed ?? s.down_speed ?? 0) || 0;
+    var upFmt = (typeof fmtBytes === 'function' ? fmtBytes(upBps) : upBps + ' B') + '/s';
+    var downFmt = (typeof fmtBytes === 'function' ? fmtBytes(downBps) : downBps + ' B') + '/s';
+
+    return '<div class="live-speed-inline num">' +
+      '<span class="live-speed-title">Live Speed</span>' +
+      '<span class="live-speed-up">↑ ' + esc(upFmt) + '</span>' +
+      '<span class="live-speed-down">↓ ' + esc(downFmt) + '</span>' +
+      '</div>';
+  }
+
   function renderDashboard() {
     topActions.innerHTML = '<div class="top-tools">' +
       '<button type="button" class="btn sec sm" id="dashRefreshBtn">Refresh Now</button>' +
@@ -454,6 +470,7 @@
 
     var html = '<div class="card" style="overflow-x:auto"><table><thead><tr>' +
       '<th>Status</th><th>Email / Name</th><th>Inbound</th><th>Traffic Usage</th><th>Expiry</th><th>Limits / Quota</th><th>Actions</th>' +
+      renderLiveSpeedRow(s, sys) +
       '</tr></thead><tbody>';
 
     rows.forEach(function (item) {
