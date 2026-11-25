@@ -22,7 +22,7 @@ var schema = []string{
 		up BIGINT NOT NULL DEFAULT 0, down BIGINT NOT NULL DEFAULT 0,
 		total_bytes BIGINT NOT NULL DEFAULT 0, expiry_at BIGINT NOT NULL DEFAULT 0,
 		settings TEXT NOT NULL DEFAULT 'null', stream_settings TEXT NOT NULL DEFAULT 'null',
-		sniffing TEXT NOT NULL DEFAULT 'null', raw TEXT NOT NULL,
+		sniffing TEXT NOT NULL DEFAULT '{"enabled":true,"destOverride":["http","tls","quic"],"metadataOnly":false,"routeOnly":false}', raw TEXT NOT NULL,
 		created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS clients (
 		id TEXT PRIMARY KEY, inbound_id TEXT NOT NULL, email TEXT NOT NULL, config TEXT NOT NULL,
@@ -134,8 +134,8 @@ const (
 	) VALUES (?,?,?,?,?) ON CONFLICT (id) DO UPDATE SET
 		name=excluded.name, token=excluded.token, scope=excluded.scope, expires_at=excluded.expires_at`
 
-	upsertMeta    = `INSERT INTO meta (k, v) VALUES (?,?) ON CONFLICT (k) DO UPDATE SET v=excluded.v`
-	insertMeta    = `INSERT INTO meta (k, v) VALUES (?,?) ON CONFLICT (k) DO NOTHING`
+	upsertMeta = `INSERT INTO meta (k, v) VALUES (?,?) ON CONFLICT (k) DO UPDATE SET v=excluded.v`
+	insertMeta = `INSERT INTO meta (k, v) VALUES (?,?) ON CONFLICT (k) DO NOTHING`
 )
 
 type sqlBackend struct {
@@ -179,7 +179,7 @@ func OpenSQL(driver, dsn string) (*Store, error) {
 		}
 	}
 	for _, m := range migrations {
-		_, _ = db.Exec(m) 
+		_, _ = db.Exec(m)
 	}
 	s, err := New(b)
 	if err != nil {

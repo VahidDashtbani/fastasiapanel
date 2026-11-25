@@ -346,11 +346,23 @@ func buildOutboundStream(s *store.OutboundStream) map[string]any {
 	return stream
 }
 
+func primaryProxyOutbound(st store.State) string {
+	for _, ob := range st.Outbounds {
+		t := strings.TrimSpace(ob.Tag)
+		if ob.Enable && t != "" && t != "direct" && t != "blocked" && t != "api" {
+			return t
+		}
+	}
+	return "direct"
+}
+
 func buildRoutingRules(st store.State) []any {
 	tags := enabledTags(st)
+	dnsOutbound := primaryProxyOutbound(st)
 	rules := []any{
 		map[string]any{"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api"},
-		map[string]any{"type": "field", "port": "53", "outboundTag": "direct"},
+		map[string]any{"type": "field", "port": "53", "outboundTag": dnsOutbound},
+		map[string]any{"type": "field", "port": "443", "network": "udp", "outboundTag": "blocked"},
 		map[string]any{
 			"type":        "field",
 			"outboundTag": "blocked",
@@ -439,6 +451,29 @@ func buildInbounds(st store.State) []any {
 		if len(dests) == 0 {
 			dests = []string{"http", "tls", "quic"}
 		}
+		sniffEnabled := true
+		sniffRouteOnly := o.Sniffing.RouteOnly
+		if len(ib.Sniffing) > 0 && string(ib.Sniffing) != "null" {
+			var dbSniff SniffingOpt
+			if json.Unmarshal(ib.Sniffing, &dbSniff) == nil {
+				sniffEnabled = dbSniff.Enabled
+				sniffRouteOnly = dbSniff.RouteOnly
+				if len(dbSniff.DestOverride) > 0 {
+					dests = nil
+					for _, d := range dbSniff.DestOverride {
+						if d != "fakedns" {
+							dests = append(dests, d)
+						}
+					}
+					if len(dests) == 0 {
+						dests = []string{"http", "tls", "quic"}
+					}
+				}
+			}
+		} else if strings.Contains(string(ib.Raw), `"sniffing"`) {
+			sniffEnabled = o.Sniffing.Enabled
+		}
+
 		item := map[string]any{
 			"tag":      ib.Tag,
 			"listen":   listen,
@@ -446,9 +481,9 @@ func buildInbounds(st store.State) []any {
 			"protocol": ib.Protocol,
 			"settings": buildProtocolSettings(ib, o, active),
 			"sniffing": map[string]any{
-				"enabled":      o.Sniffing.Enabled,
+				"enabled":      sniffEnabled,
 				"destOverride": dests,
-				"routeOnly":    o.Sniffing.RouteOnly,
+				"routeOnly":    sniffRouteOnly,
 			},
 		}
 		if ib.Protocol != "wireguard" {

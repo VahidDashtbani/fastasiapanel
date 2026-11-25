@@ -1,15 +1,15 @@
 package web
 
 import (
-	"fmt"
-	"time"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"fastasiapanel/internal/auth"
 	"fastasiapanel/internal/config"
@@ -110,8 +110,6 @@ func TestPanelFlow(t *testing.T) {
 		t.Fatalf("expected empty list, got %s", rec.Body.String())
 	}
 }
-
-
 
 type fapReleaseInfo struct {
 	TagName string `json:"tag_name"`

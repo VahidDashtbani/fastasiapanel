@@ -69,26 +69,26 @@ func BuildLink(in store.Inbound, c store.Client, defaultHost string) string {
 			q.Set("allowInsecure", "1")
 		}
 	case "reality":
-	q.Set("pbk", o.Reality.PublicKey)
-	sni := firstCSV(o.Reality.ServerName)
-	if sni == "" {
-		sni = bare
-	}
-	q.Set("sni", sni)
-	sid := firstCSV(o.Reality.ShortID)
-	if sid != "" {
-		q.Set("sid", sid)
-	}
-	fp := o.Reality.Fingerprint
-	if fp == "" {
-		fp = "chrome"
-	}
-	spx := o.Reality.SpiderX
-	if spx == "" {
-		spx = "/"
-	}
-	q.Set("fp", fp)
-	q.Set("spx", spx)
+		q.Set("pbk", o.Reality.PublicKey)
+		sni := firstCSV(o.Reality.ServerName)
+		if sni == "" {
+			sni = bare
+		}
+		q.Set("sni", sni)
+		sid := firstCSV(o.Reality.ShortID)
+		if sid != "" {
+			q.Set("sid", sid)
+		}
+		fp := o.Reality.Fingerprint
+		if fp == "" {
+			fp = "chrome"
+		}
+		spx := o.Reality.SpiderX
+		if spx == "" {
+			spx = "/"
+		}
+		q.Set("fp", fp)
+		q.Set("spx", spx)
 	}
 
 	remarkLabel := c.Email

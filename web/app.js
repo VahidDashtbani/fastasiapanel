@@ -1154,7 +1154,7 @@ function renderRouting() {
       '</select></label>' +
       '<label>Server Address / Endpoint<input class="ltr" name="address" placeholder="127.0.0.1 or example.com" value="' + esc(o.address || '') + '"></label>' +
       '<label>Port<input class="ltr" name="port" type="number" placeholder="40000" value="' + esc(o.port || '') + '"></label>' +
-      '<label>Username / UUID / Key<input class="ltr" name="username" placeholder="Optional / UUID / WG PrivKey" value="' + esc(o.username || '') + '"></label>' +
+      '<label>Username / UUID / Key<input class="ltr" name="username" placeholder="Leave empty for no-auth SOCKS, or paste exact UUID" value="' + esc(o.username || '') + '"></label>' +
       '<label>Password / Method / PeerKey<input class="ltr" name="password" placeholder="Optional / Password / PublicKey" value="' + esc(o.password || '') + '"></label>' +
       '<label>Security / TLS<select name="ob_sec">' +
       opt('none', 'None', ext.security || 'none') +

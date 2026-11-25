@@ -46,19 +46,22 @@ func TestRoutingOrderAndFailClosed(t *testing.T) {
 		},
 	}
 	r := buildRoutingRules(st)
-	if len(r) != 6 {
-		t.Fatalf("want 6 rules, got %d", len(r))
+	if len(r) != 7 {
+		t.Fatalf("want 7 rules, got %d", len(r))
 	}
-	if r[1].(map[string]any)["port"] != "53" {
-		t.Fatal("DNS rule must be second")
+	if r[1].(map[string]any)["port"] != "53" || r[1].(map[string]any)["outboundTag"] != "nether" {
+		t.Fatal("DNS rule must be second and route via primary proxy outbound")
 	}
-	if r[2].(map[string]any)["outboundTag"] != "blocked" {
+	if r[2].(map[string]any)["port"] != "443" || r[2].(map[string]any)["network"] != "udp" || r[2].(map[string]any)["outboundTag"] != "blocked" {
+		t.Fatal("QUIC UDP 443 block must be third")
+	}
+	if r[3].(map[string]any)["outboundTag"] != "blocked" {
 		t.Fatal("private block must precede user rules")
 	}
-	if r[4].(map[string]any)["outboundTag"] != "blocked" {
+	if r[5].(map[string]any)["outboundTag"] != "blocked" {
 		t.Fatal("rule with missing outbound must fail closed")
 	}
-	if r[5].(map[string]any)["outboundTag"] != "nether" {
+	if r[6].(map[string]any)["outboundTag"] != "nether" {
 		t.Fatal("nether rule must come last")
 	}
 }

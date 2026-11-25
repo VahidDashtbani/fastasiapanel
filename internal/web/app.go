@@ -1179,8 +1179,26 @@ func validateOutboundBasic(req store.Outbound) error {
 	if req.Tag == "direct" || req.Tag == "blocked" || req.Tag == "api" {
 		return errors.New("reserved outbound tag")
 	}
-	if (req.Protocol == "socks" || req.Protocol == "http") && (req.Address == "" || req.Port <= 0 || req.Port > 65535) {
-		return errors.New("valid address and port are required for " + req.Protocol)
+	proto := strings.ToLower(strings.TrimSpace(req.Protocol))
+	switch proto {
+	case "socks", "http":
+		if req.Address == "" || req.Port <= 0 || req.Port > 65535 {
+			return errors.New("valid address and port are required for " + proto)
+		}
+	case "vless", "vmess":
+		if req.Address == "" || req.Port <= 0 || req.Port > 65535 {
+			return errors.New("valid address and port are required for " + proto)
+		}
+		if len(strings.TrimSpace(req.Username)) != 36 {
+			return errors.New("valid 36-character UUID is required in Username/UUID field for " + proto)
+		}
+	case "trojan", "shadowsocks":
+		if req.Address == "" || req.Port <= 0 || req.Port > 65535 {
+			return errors.New("valid address and port are required for " + proto)
+		}
+		if strings.TrimSpace(req.Password) == "" {
+			return errors.New("password is required for " + proto)
+		}
 	}
 	return nil
 }
