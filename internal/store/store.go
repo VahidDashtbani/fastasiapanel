@@ -55,33 +55,33 @@ type Client struct {
 }
 
 type OutboundStream struct {
-	Network    string `json:"network,omitempty"`     
-	Security   string `json:"security,omitempty"`    
-	SNI        string `json:"sni,omitempty"`
-	ALPN       string `json:"alpn,omitempty"`        
-	Fingerprint string `json:"fingerprint,omitempty"` 
-	Path       string `json:"path,omitempty"`
-	Host       string `json:"host,omitempty"`
+	Network     string `json:"network,omitempty"`
+	Security    string `json:"security,omitempty"`
+	SNI         string `json:"sni,omitempty"`
+	ALPN        string `json:"alpn,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Path        string `json:"path,omitempty"`
+	Host        string `json:"host,omitempty"`
 	ServiceName string `json:"service_name,omitempty"`
-	Mode       string `json:"mode,omitempty"`        
-	PublicKey  string `json:"public_key,omitempty"` 
-	ShortID    string `json:"short_id,omitempty"`    
-	SpiderX    string `json:"spider_x,omitempty"`    
-	Flow       string `json:"flow,omitempty"`       
-	AlterID    int    `json:"alter_id,omitempty"`    
-	Cipher     string `json:"cipher,omitempty"`      
+	Mode        string `json:"mode,omitempty"`
+	PublicKey   string `json:"public_key,omitempty"`
+	ShortID     string `json:"short_id,omitempty"`
+	SpiderX     string `json:"spider_x,omitempty"`
+	Flow        string `json:"flow,omitempty"`
+	AlterID     int    `json:"alter_id,omitempty"`
+	Cipher      string `json:"cipher,omitempty"`
 }
 
 type Outbound struct {
 	ID       string          `json:"id"`
 	Tag      string          `json:"tag"`
 	Remark   string          `json:"remark"`
-	Protocol string          `json:"protocol"` 
+	Protocol string          `json:"protocol"`
 	Address  string          `json:"address,omitempty"`
 	Port     int             `json:"port,omitempty"`
-	Username string          `json:"username,omitempty"` 
-	Password string          `json:"password,omitempty"` 
-	RelayTag string          `json:"relay_tag,omitempty"` 
+	Username string          `json:"username,omitempty"`
+	Password string          `json:"password,omitempty"`
+	RelayTag string          `json:"relay_tag,omitempty"`
 	Stream   *OutboundStream `json:"stream,omitempty"`
 	Settings json.RawMessage `json:"settings,omitempty"`
 	Enable   bool            `json:"enable"`
@@ -175,6 +175,43 @@ type Store struct {
 	state   State
 }
 
+func ensureBuiltinOutbounds(st *State) bool {
+	hasDirect := false
+	hasBlocked := false
+	for _, ob := range st.Outbounds {
+		switch strings.TrimSpace(ob.Tag) {
+		case "direct":
+			hasDirect = true
+		case "blocked":
+			hasBlocked = true
+		}
+	}
+	if hasDirect && hasBlocked {
+		return false
+	}
+	var prefix []Outbound
+	if !hasDirect {
+		prefix = append(prefix, Outbound{
+			ID:       "sys-direct",
+			Tag:      "direct",
+			Remark:   "Direct (Freedom)",
+			Protocol: "freedom",
+			Enable:   true,
+		})
+	}
+	if !hasBlocked {
+		prefix = append(prefix, Outbound{
+			ID:       "sys-blocked",
+			Tag:      "blocked",
+			Remark:   "Blocked (Blackhole)",
+			Protocol: "blackhole",
+			Enable:   true,
+		})
+	}
+	st.Outbounds = append(prefix, st.Outbounds...)
+	return true
+}
+
 func normalize(st *State) {
 	if st.Inbounds == nil {
 		st.Inbounds = []Inbound{}
@@ -200,6 +237,7 @@ func normalize(st *State) {
 	if st.Settings == nil {
 		st.Settings = map[string]string{}
 	}
+	ensureBuiltinOutbounds(st)
 }
 
 func clone(st State) (State, error) {

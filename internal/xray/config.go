@@ -87,6 +87,9 @@ func buildOutbounds(st store.State) []any {
 	}
 
 	for _, ob := range st.Outbounds {
+		if t := strings.TrimSpace(ob.Tag); t == "direct" || t == "blocked" || t == "api" {
+			continue
+		}
 		if !ob.Enable || strings.TrimSpace(ob.Tag) == "" {
 			continue
 		}

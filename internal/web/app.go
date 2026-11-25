@@ -1167,6 +1167,11 @@ func parseOutboundRequest(w http.ResponseWriter, r *http.Request) (store.Outboun
 	return req, idx, true
 }
 
+func isBuiltinOutboundTag(tag string) bool {
+	t := strings.TrimSpace(tag)
+	return t == "direct" || t == "blocked" || t == "api"
+}
+
 func validateOutboundBasic(req store.Outbound) error {
 	if req.Tag == "" || req.Protocol == "" {
 		return errors.New("tag and protocol are required")
@@ -1248,6 +1253,9 @@ func (a *App) updateOutbound(w http.ResponseWriter, r *http.Request) {
 		if targetIdx == -1 {
 			return errNotFound
 		}
+		if isBuiltinOutboundTag(s.Outbounds[targetIdx].Tag) {
+			return errors.New("built-in outbound cannot be modified")
+		}
 		for i, o := range s.Outbounds {
 			if i != targetIdx && o.Tag == req.Tag {
 				return errors.New("outbound tag already exists")
@@ -1276,6 +1284,9 @@ func (a *App) toggleOutbound(w http.ResponseWriter, r *http.Request) {
 	err := a.st.Update(func(s *store.State) error {
 		for i := range s.Outbounds {
 			if s.Outbounds[i].ID == id {
+				if isBuiltinOutboundTag(s.Outbounds[i].Tag) {
+					return errors.New("built-in outbound cannot be disabled")
+				}
 				s.Outbounds[i].Enable = !s.Outbounds[i].Enable
 				return nil
 			}
@@ -1461,6 +1472,9 @@ func (a *App) deleteOutbound(w http.ResponseWriter, r *http.Request) {
 			return errNotFound
 		}
 		deletedTag := s.Outbounds[targetIdx].Tag
+		if isBuiltinOutboundTag(deletedTag) {
+			return errors.New("built-in outbound cannot be deleted")
+		}
 		s.Outbounds = append(s.Outbounds[:targetIdx], s.Outbounds[targetIdx+1:]...)
 
 		for i := range s.Outbounds {
