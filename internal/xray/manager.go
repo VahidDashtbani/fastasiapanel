@@ -3,6 +3,7 @@ package xray
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -17,15 +18,20 @@ import (
 )
 
 type Manager struct {
-	cfg     config.Config
-	st      *store.Store
-	mu      sync.Mutex
-	cmd     *exec.Cmd
-	done    chan struct{}
-	running atomic.Bool
-	timer   *time.Timer
-	liveMu  sync.RWMutex
-	live    map[string]liveStat
+	cfg       config.Config
+	st        *store.Store
+	mu        sync.Mutex
+	cmd       *exec.Cmd
+	done      chan struct{}
+	running   atomic.Bool
+	timer     *time.Timer
+	liveMu    sync.RWMutex
+	live      map[string]liveStat
+	want      atomic.Bool
+	lastErr   atomic.Value
+	fails     int
+	retryAt   time.Time
+	startedAt time.Time
 }
 
 type liveStat struct {
@@ -88,25 +94,40 @@ func (m *Manager) Version() string {
 	return "unknown"
 }
 
-func (m *Manager) writeConfig() error {
+func (m *Manager) setErr(err error) {
+	if err == nil {
+		m.lastErr.Store("")
+	} else {
+		m.lastErr.Store(err.Error())
+	}
+}
+
+func (m *Manager) LastError() string {
+	s, _ := m.lastErr.Load().(string)
+	return s
+}
+
+func (m *Manager) prepareConfig() (string, error) {
 	data, err := BuildConfig(m.st.Snapshot())
 	if err != nil {
-		return err
+		return "", err
 	}
 	tmp := strings.TrimSuffix(m.cfg.XrayConfig, ".json") + ".new.json"
 	if err = os.WriteFile(tmp, data, 0600); err != nil {
-		return err
+		return "", err
 	}
-	out, err := exec.Command(m.cfg.XrayBinary, "run", "-test", "-config", tmp).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, m.cfg.XrayBinary, "run", "-test", "-config", tmp).CombinedOutput()
 	if err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		msg := strings.TrimSpace(string(out))
 		if msg == "" {
 			msg = err.Error()
 		}
-		return fmt.Errorf("xray rejected the config: %s", msg)
+		return "", fmt.Errorf("xray rejected the config: %s", msg)
 	}
-	return os.Rename(tmp, m.cfg.XrayConfig)
+	return tmp, nil
 }
 
 func (m *Manager) stopLocked() {
@@ -147,13 +168,45 @@ func (m *Manager) startLocked() error {
 }
 
 func (m *Manager) Start() error {
-	if err := m.writeConfig(); err != nil {
-		return err
-	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	next, err := m.prepareConfig()
+	if err != nil {
+		m.setErr(err)
+		return err
+	}
+	live := m.cfg.XrayConfig
+	prev, readErr := os.ReadFile(live)
+	if readErr == nil {
+		_ = os.WriteFile(live+".last-good", prev, 0600)
+	}
+	if err = os.Rename(next, live); err != nil {
+		m.setErr(err)
+		return err
+	}
 	m.stopLocked()
-	return m.startLocked()
+	if err = m.startLocked(); err != nil {
+		m.setErr(err)
+		return err
+	}
+	m.want.Store(true)
+	m.startedAt = time.Now()
+	select {
+	case <-m.done:
+		err = errors.New("xray exited right after start")
+		if readErr == nil {
+			_ = os.WriteFile(live, prev, 0600)
+			if m.startLocked() == nil {
+				m.startedAt = time.Now()
+				err = errors.New("xray exited right after start; previous config restored")
+			}
+		}
+		m.setErr(err)
+		return err
+	case <-time.After(2 * time.Second):
+	}
+	m.setErr(nil)
+	return nil
 }
 
 func (m *Manager) Restart() error {
@@ -161,6 +214,7 @@ func (m *Manager) Restart() error {
 }
 
 func (m *Manager) Stop() {
+	m.want.Store(false)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.timer != nil {
@@ -180,6 +234,35 @@ func (m *Manager) Schedule() {
 			log.Printf("xray restart failed: %v", err)
 		}
 	})
+}
+
+func (m *Manager) watchdog() {
+	if !m.want.Load() {
+		return
+	}
+	m.mu.Lock()
+	if m.running.Load() {
+		if m.fails > 0 && time.Since(m.startedAt) > 30*time.Second {
+			m.fails = 0
+		}
+		m.mu.Unlock()
+		return
+	}
+	if time.Now().Before(m.retryAt) {
+		m.mu.Unlock()
+		return
+	}
+	m.fails++
+	n := m.fails
+	if n > 10 {
+		n = 10
+	}
+	m.retryAt = time.Now().Add(time.Duration(n) * 3 * time.Second)
+	m.mu.Unlock()
+	log.Printf("xray is down, restarting (attempt %d)", n)
+	if err := m.Restart(); err != nil {
+		log.Printf("watchdog restart failed: %v", err)
+	}
 }
 
 type delta struct{ up, down int64 }
@@ -333,6 +416,7 @@ func (m *Manager) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			m.watchdog()
 			m.tick()
 		}
 	}

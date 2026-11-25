@@ -23,7 +23,7 @@ func BuildConfig(st store.State) ([]byte, error) {
 
 	domainStrategy := st.Settings["routing_strategy"]
 	if domainStrategy == "" {
-		domainStrategy = "IPIfNonMatch"
+		domainStrategy = "AsIs"
 	}
 
 	cfg := map[string]any{
@@ -57,13 +57,24 @@ func BuildConfig(st store.State) ([]byte, error) {
 	return json.MarshalIndent(cfg, "", "  ")
 }
 
+func enabledTags(st store.State) map[string]bool {
+	t := map[string]bool{"direct": true, "blocked": true}
+	for _, ob := range st.Outbounds {
+		if tag := strings.TrimSpace(ob.Tag); ob.Enable && tag != "" {
+			t[tag] = true
+		}
+	}
+	return t
+}
+
 func buildOutbounds(st store.State) []any {
+	tags := enabledTags(st)
 	list := []any{
 		map[string]any{
 			"tag":      "direct",
 			"protocol": "freedom",
 			"settings": map[string]any{
-				"domainStrategy": "UseIPv4",
+				"domainStrategy": "AsIs",
 			},
 		},
 		map[string]any{
@@ -84,11 +95,8 @@ func buildOutbounds(st store.State) []any {
 			"tag":      ob.Tag,
 			"protocol": proto,
 		}
-		if strings.TrimSpace(ob.RelayTag) != "" {
-			item["proxySettings"] = map[string]any{
-				"tag":            strings.TrimSpace(ob.RelayTag),
-				"transportLayer": true,
-			}
+		if rt := strings.TrimSpace(ob.RelayTag); rt != "" && rt != strings.TrimSpace(ob.Tag) && tags[rt] {
+			item["proxySettings"] = map[string]any{"tag": rt, "transportLayer": true}
 		}
 
 		switch proto {
@@ -336,33 +344,34 @@ func buildOutboundStream(s *store.OutboundStream) map[string]any {
 }
 
 func buildRoutingRules(st store.State) []any {
+	tags := enabledTags(st)
 	rules := []any{
+		map[string]any{"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api"},
+		map[string]any{"type": "field", "port": "53", "outboundTag": "direct"},
 		map[string]any{
 			"type":        "field",
-			"inboundTag":  []string{"api"},
-			"outboundTag": "api",
+			"outboundTag": "blocked",
+			"ip": []string{
+				"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8",
+				"169.254.0.0/16", "fc00::/7", "fe80::/10", "::1/128",
+			},
 		},
-		map[string]any{
-			"type":        "field",
-			"port":        "53",
-			"outboundTag": "direct",
-		},
+		map[string]any{"type": "field", "outboundTag": "blocked", "protocol": []string{"bittorrent"}},
 	}
 
 	sorted := make([]store.RoutingRule, len(st.RoutingRules))
 	copy(sorted, st.RoutingRules)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].Priority < sorted[j].Priority
-	})
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Priority < sorted[j].Priority })
 
 	for _, r := range sorted {
-		if !r.Enable || r.OutboundTag == "" {
+		tag := strings.TrimSpace(r.OutboundTag)
+		if !r.Enable || tag == "" {
 			continue
 		}
-		item := map[string]any{
-			"type":        "field",
-			"outboundTag": r.OutboundTag,
+		if !tags[tag] {
+			tag = "blocked" // fail-closed: prevent IP leak when outbound is missing/disabled
 		}
+		item := map[string]any{"type": "field", "outboundTag": tag}
 		if len(r.InboundTags) > 0 {
 			item["inboundTag"] = r.InboundTags
 		}
@@ -383,22 +392,6 @@ func buildRoutingRules(st store.State) []any {
 		}
 		rules = append(rules, item)
 	}
-
-	rules = append(rules, map[string]any{
-		"type": "field",
-		"ip": []string{
-			"10.0.0.0/8",
-			"172.16.0.0/12",
-			"192.168.0.0/16",
-			"127.0.0.0/8",
-			"169.254.0.0/16",
-			"fc00::/7",
-			"fe80::/10",
-			"::1/128",
-		},
-		"outboundTag": "blocked",
-	})
-
 	return rules
 }
 

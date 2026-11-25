@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1461,10 +1462,9 @@ func (a *App) deleteOutbound(w http.ResponseWriter, r *http.Request) {
 		deletedTag := s.Outbounds[targetIdx].Tag
 		s.Outbounds = append(s.Outbounds[:targetIdx], s.Outbounds[targetIdx+1:]...)
 
-		// Disable routing rules referencing the deleted outbound so Xray config test never fails
-		for i := range s.RoutingRules {
-			if s.RoutingRules[i].OutboundTag == deletedTag {
-				s.RoutingRules[i].Enable = false
+		for i := range s.Outbounds {
+			if s.Outbounds[i].RelayTag == deletedTag {
+				s.Outbounds[i].RelayTag = ""
 			}
 		}
 		return nil
@@ -1492,9 +1492,6 @@ func (a *App) createRouting(w http.ResponseWriter, r *http.Request) {
 	if req.Remark == "" {
 		req.Remark = req.OutboundTag + " rule"
 	}
-	if req.Priority == 0 {
-		req.Priority = 50
-	}
 
 	cleanSlice := func(items []string) []string {
 		out := make([]string, 0, len(items))
@@ -1520,6 +1517,18 @@ func (a *App) createRouting(w http.ResponseWriter, r *http.Request) {
 	req.Enable = true
 
 	err = a.st.Update(func(s *store.State) error {
+		if !outboundTagExists(s, req.OutboundTag) {
+			return errors.New("unknown or disabled outbound_tag")
+		}
+		if req.Priority == 0 {
+			max := 0
+			for _, r := range s.RoutingRules {
+				if r.Priority > max {
+					max = r.Priority
+				}
+			}
+			req.Priority = max + 10
+		}
 		s.RoutingRules = append(s.RoutingRules, req)
 		return nil
 	})
@@ -1641,6 +1650,9 @@ func (a *App) updateRouting(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := a.st.Update(func(s *store.State) error {
+		if req.OutboundTag != "" && !outboundTagExists(s, req.OutboundTag) {
+			return errors.New("unknown or disabled outbound_tag")
+		}
 		for i := range s.RoutingRules {
 			if s.RoutingRules[i].ID == id {
 				req.ID = id
@@ -1654,6 +1666,43 @@ func (a *App) updateRouting(w http.ResponseWriter, r *http.Request) {
 	a.finish(w, err, map[string]bool{"ok": true})
 }
 
+func outboundTagExists(s *store.State, tag string) bool {
+	if tag == "direct" || tag == "blocked" {
+		return true
+	}
+	for _, o := range s.Outbounds {
+		if o.Enable && o.Tag == tag {
+			return true
+		}
+	}
+	return false
+}
+
+func moveRule(rules []store.RoutingRule, id, dir string) error {
+	sort.SliceStable(rules, func(i, j int) bool { return rules[i].Priority < rules[j].Priority })
+	idx := -1
+	for i := range rules {
+		if rules[i].ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return errNotFound
+	}
+	t := idx - 1
+	if dir == "down" {
+		t = idx + 1
+	}
+	if t >= 0 && t < len(rules) {
+		rules[idx], rules[t] = rules[t], rules[idx]
+	}
+	for i := range rules {
+		rules[i].Priority = (i + 1) * 10
+	}
+	return nil
+}
+
 func (a *App) moveRouting(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req struct {
@@ -1663,30 +1712,7 @@ func (a *App) moveRouting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := a.st.Update(func(s *store.State) error {
-		idx := -1
-		for i := range s.RoutingRules {
-			if s.RoutingRules[i].ID == id {
-				idx = i
-				break
-			}
-		}
-		if idx == -1 {
-			return errNotFound
-		}
-		delta := -1
-		if req.Direction == "down" {
-			delta = 1
-		}
-		target := idx + delta
-		if target < 0 || target >= len(s.RoutingRules) {
-			return nil
-		}
-		s.RoutingRules[idx], s.RoutingRules[target] = s.RoutingRules[target], s.RoutingRules[idx]
-		if s.RoutingRules[idx].Priority == s.RoutingRules[target].Priority {
-			s.RoutingRules[idx].Priority = (target + 1) * 10
-			s.RoutingRules[target].Priority = (idx + 1) * 10
-		}
-		return nil
+		return moveRule(s.RoutingRules, id, req.Direction)
 	})
 	a.finish(w, err, map[string]bool{"ok": true})
 }

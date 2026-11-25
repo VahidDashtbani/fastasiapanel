@@ -36,3 +36,29 @@ func TestDisabledClientsAreSkipped(t *testing.T) {
 		t.Fatal("disabled client must not be written to the config")
 	}
 }
+
+func TestRoutingOrderAndFailClosed(t *testing.T) {
+	st := store.State{
+		Outbounds: []store.Outbound{{Tag: "nether", Protocol: "socks", Address: "127.0.0.1", Port: 40001, Enable: true}},
+		RoutingRules: []store.RoutingRule{
+			{ID: "a", OutboundTag: "nether", InboundTags: []string{"in-1"}, Priority: 20, Enable: true},
+			{ID: "b", OutboundTag: "ghost", Domains: []string{"domain:x.com"}, Priority: 10, Enable: true},
+		},
+	}
+	r := buildRoutingRules(st)
+	if len(r) != 6 {
+		t.Fatalf("want 6 rules, got %d", len(r))
+	}
+	if r[1].(map[string]any)["port"] != "53" {
+		t.Fatal("DNS rule must be second")
+	}
+	if r[2].(map[string]any)["outboundTag"] != "blocked" {
+		t.Fatal("private block must precede user rules")
+	}
+	if r[4].(map[string]any)["outboundTag"] != "blocked" {
+		t.Fatal("rule with missing outbound must fail closed")
+	}
+	if r[5].(map[string]any)["outboundTag"] != "nether" {
+		t.Fatal("nether rule must come last")
+	}
+}
