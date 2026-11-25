@@ -6,3 +6,5 @@ data/
 config.json
 *.exe
 fastasiapanel
+*.deb
+dist/

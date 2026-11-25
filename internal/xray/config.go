@@ -62,22 +62,36 @@ func buildOutbounds(st store.State) []any {
 		map[string]any{
 			"tag":      "direct",
 			"protocol": "freedom",
+			"settings": map[string]any{
+				"domainStrategy": "UseIPv4",
+			},
 		},
 		map[string]any{
 			"tag":      "blocked",
 			"protocol": "blackhole",
+			"settings": map[string]any{
+				"response": map[string]any{"type": "http"},
+			},
 		},
 	}
 
 	for _, ob := range st.Outbounds {
-		if !ob.Enable {
+		if !ob.Enable || strings.TrimSpace(ob.Tag) == "" {
 			continue
 		}
+		proto := strings.ToLower(strings.TrimSpace(ob.Protocol))
 		item := map[string]any{
 			"tag":      ob.Tag,
-			"protocol": ob.Protocol,
+			"protocol": proto,
 		}
-		switch ob.Protocol {
+		if strings.TrimSpace(ob.RelayTag) != "" {
+			item["proxySettings"] = map[string]any{
+				"tag":            strings.TrimSpace(ob.RelayTag),
+				"transportLayer": true,
+			}
+		}
+
+		switch proto {
 		case "freedom":
 			item["settings"] = map[string]any{"domainStrategy": "UseIP"}
 		case "blackhole":
@@ -98,6 +112,113 @@ func buildOutbounds(st store.State) []any {
 			item["settings"] = map[string]any{
 				"servers": []any{srv},
 			}
+		case "vless":
+			if len(ob.Settings) > 0 && ob.Address == "" {
+				var raw any
+				if json.Unmarshal(ob.Settings, &raw) == nil {
+					item["settings"] = raw
+				}
+			} else {
+				user := map[string]any{
+					"id":         ob.Username,
+					"encryption": "none",
+				}
+				if ob.Stream != nil && ob.Stream.Flow != "" {
+					user["flow"] = ob.Stream.Flow
+				}
+				item["settings"] = map[string]any{
+					"vnext": []any{
+						map[string]any{
+							"address": ob.Address,
+							"port":    ob.Port,
+							"users":   []any{user},
+						},
+					},
+				}
+			}
+			if ob.Stream != nil {
+				item["streamSettings"] = buildOutboundStream(ob.Stream)
+			}
+		case "vmess":
+			if len(ob.Settings) > 0 && ob.Address == "" {
+				var raw any
+				if json.Unmarshal(ob.Settings, &raw) == nil {
+					item["settings"] = raw
+				}
+			} else {
+				aid := 0
+				sec := "auto"
+				if ob.Stream != nil {
+					aid = ob.Stream.AlterID
+					if ob.Stream.Cipher != "" {
+						sec = ob.Stream.Cipher
+					}
+				}
+				item["settings"] = map[string]any{
+					"vnext": []any{
+						map[string]any{
+							"address": ob.Address,
+							"port":    ob.Port,
+							"users": []any{
+								map[string]any{
+									"id":       ob.Username,
+									"alterId":  aid,
+									"security": sec,
+								},
+							},
+						},
+					},
+				}
+			}
+			if ob.Stream != nil {
+				item["streamSettings"] = buildOutboundStream(ob.Stream)
+			}
+		case "trojan":
+			if len(ob.Settings) > 0 && ob.Address == "" {
+				var raw any
+				if json.Unmarshal(ob.Settings, &raw) == nil {
+					item["settings"] = raw
+				}
+			} else {
+				pass := ob.Password
+				if pass == "" {
+					pass = ob.Username
+				}
+				item["settings"] = map[string]any{
+					"servers": []any{
+						map[string]any{
+							"address":  ob.Address,
+							"port":     ob.Port,
+							"password": pass,
+						},
+					},
+				}
+			}
+			if ob.Stream != nil {
+				item["streamSettings"] = buildOutboundStream(ob.Stream)
+			}
+		case "shadowsocks":
+			if len(ob.Settings) > 0 && ob.Address == "" {
+				var raw any
+				if json.Unmarshal(ob.Settings, &raw) == nil {
+					item["settings"] = raw
+				}
+			} else {
+				method := "chacha20-ietf-poly1305"
+				if ob.Stream != nil && ob.Stream.Cipher != "" {
+					method = ob.Stream.Cipher
+				}
+				item["settings"] = map[string]any{
+					"servers": []any{
+						map[string]any{
+							"address":  ob.Address,
+							"port":     ob.Port,
+							"method":   method,
+							"password": ob.Password,
+						},
+					},
+				}
+			}
 		default:
 			if len(ob.Settings) > 0 {
 				var raw any
@@ -105,10 +226,113 @@ func buildOutbounds(st store.State) []any {
 					item["settings"] = raw
 				}
 			}
+			if ob.Stream != nil {
+				item["streamSettings"] = buildOutboundStream(ob.Stream)
+			}
 		}
 		list = append(list, item)
 	}
 	return list
+}
+
+func buildOutboundStream(s *store.OutboundStream) map[string]any {
+	netType := strings.TrimSpace(s.Network)
+	if netType == "" {
+		netType = "tcp"
+	}
+	secType := strings.TrimSpace(s.Security)
+	if secType == "" {
+		secType = "none"
+	}
+	stream := map[string]any{
+		"network":  netType,
+		"security": secType,
+	}
+	switch netType {
+	case "ws":
+		ws := map[string]any{}
+		if s.Path != "" {
+			ws["path"] = s.Path
+		}
+		if s.Host != "" {
+			ws["headers"] = map[string]any{"Host": s.Host}
+		}
+		stream["wsSettings"] = ws
+	case "grpc":
+		grpc := map[string]any{}
+		sn := s.ServiceName
+		if sn == "" {
+			sn = strings.TrimPrefix(s.Path, "/")
+		}
+		if sn != "" {
+			grpc["serviceName"] = sn
+		}
+		stream["grpcSettings"] = grpc
+	case "httpupgrade":
+		hu := map[string]any{}
+		if s.Path != "" {
+			hu["path"] = s.Path
+		}
+		if s.Host != "" {
+			hu["host"] = s.Host
+		}
+		stream["httpupgradeSettings"] = hu
+	case "xhttp":
+		xh := map[string]any{}
+		if s.Path != "" {
+			xh["path"] = s.Path
+		}
+		if s.Host != "" {
+			xh["host"] = s.Host
+		}
+		if s.Mode != "" {
+			xh["mode"] = s.Mode
+		}
+		stream["xhttpSettings"] = xh
+	}
+	switch secType {
+	case "tls":
+		tlsCfg := map[string]any{
+			"allowInsecure": false,
+		}
+		if s.SNI != "" {
+			tlsCfg["serverName"] = s.SNI
+		} else if s.Host != "" {
+			tlsCfg["serverName"] = s.Host
+		}
+		if s.Fingerprint != "" {
+			tlsCfg["fingerprint"] = s.Fingerprint
+		}
+		if s.ALPN != "" {
+			var alpns []string
+			for _, a := range strings.Split(s.ALPN, ",") {
+				if t := strings.TrimSpace(a); t != "" {
+					alpns = append(alpns, t)
+				}
+			}
+			if len(alpns) > 0 {
+				tlsCfg["alpn"] = alpns
+			}
+		}
+		stream["tlsSettings"] = tlsCfg
+	case "reality":
+		fp := s.Fingerprint
+		if fp == "" {
+			fp = "chrome"
+		}
+		spx := s.SpiderX
+		if spx == "" {
+			spx = "/"
+		}
+		stream["realitySettings"] = map[string]any{
+			"serverName":  s.SNI,
+			"fingerprint": fp,
+			"publicKey":   s.PublicKey,
+			"shortId":     s.ShortID,
+			"spiderX":     spx,
+		}
+	}
+	return stream
 }
 
 func buildRoutingRules(st store.State) []any {
@@ -117,6 +341,11 @@ func buildRoutingRules(st store.State) []any {
 			"type":        "field",
 			"inboundTag":  []string{"api"},
 			"outboundTag": "api",
+		},
+		map[string]any{
+			"type":        "field",
+			"port":        "53",
+			"outboundTag": "direct",
 		},
 	}
 
@@ -205,7 +434,12 @@ func buildInbounds(st store.State) []any {
 		if listen == "" {
 			listen = "0.0.0.0"
 		}
-		dests := o.Sniffing.DestOverride
+		var dests []string
+		for _, d := range o.Sniffing.DestOverride {
+			if d != "fakedns" {
+				dests = append(dests, d)
+			}
+		}
 		if len(dests) == 0 {
 			dests = []string{"http", "tls", "quic"}
 		}

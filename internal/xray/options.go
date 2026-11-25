@@ -88,7 +88,7 @@ func ParseOptions(raw json.RawMessage) (Options, error) {
 	o := Options{
 		Sniffing: SniffingOpt{
 			Enabled:      true,
-			DestOverride: []string{"http", "tls", "quic", "fakedns"},
+			DestOverride: []string{"http", "tls", "quic"},
 		},
 	}
 	if len(raw) > 0 {
@@ -154,11 +154,11 @@ func Normalize(protocol string, o *Options) {
 		o.Fallbacks = nil
 	}
 	if o.Network == "xhttp" && o.XhttpMode == "" {
-	o.XhttpMode = "auto"
-}
-if o.Network != "xhttp" {
-	o.XhttpMode = ""
-}
+		o.XhttpMode = "auto"
+	}
+	if o.Network != "xhttp" {
+		o.XhttpMode = ""
+	}
 }
 
 func ValidateInbound(in store.Inbound, o Options) error {

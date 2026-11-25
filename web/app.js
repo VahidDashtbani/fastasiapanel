@@ -3970,3 +3970,47 @@ function fapMakeScannableQR(text, sizePx) {
   });
 })();
 // === FAP QR & SUBSCRIPTION CONFIGS END ===
+
+
+// Reliable delegated handler for Outbound Delete buttons across all views
+(function() {
+  if (window.__fapDeleteOutboundDelegated) return;
+  window.__fapDeleteOutboundDelegated = true;
+
+  document.addEventListener('click', async function(e) {
+    const btn = e.target && e.target.closest ? e.target.closest('[data-act="del-outbound"], .del-outbound-btn') : null;
+    if (!btn) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    const oid = btn.getAttribute('data-oid') || btn.getAttribute('data-id') || btn.getAttribute('data-tag') || '';
+    if (!oid) return;
+    if (!confirm('Delete outbound "' + oid + '"?')) return;
+
+    const baseMatch = window.location.pathname.match(/^(\/[^/]+)/);
+    const basePath = (baseMatch && baseMatch[1] !== '/outbounds' && baseMatch[1] !== '/routing') ? baseMatch[1] : '';
+    const url = basePath + '/api/outbounds/' + encodeURIComponent(oid);
+
+    btn.disabled = true;
+    try {
+      const res = await fetch(url, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert('Delete failed: ' + (data.error || data.message || res.statusText));
+        btn.disabled = false;
+        return;
+      }
+      if (typeof toast === 'function') toast('Outbound deleted');
+      if (typeof renderOutbounds === 'function' && document.getElementById('outbounds-table-box')) {
+        renderOutbounds();
+      } else if (typeof renderRouting === 'function') {
+        renderRouting();
+      } else {
+        window.location.reload();
+      }
+    } catch (err) {
+      alert('Delete error: ' + (err && err.message ? err.message : String(err)));
+      btn.disabled = false;
+    }
+  }, true);
+})();
