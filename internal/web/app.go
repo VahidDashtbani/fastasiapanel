@@ -612,6 +612,7 @@ func (a *App) status(w http.ResponseWriter, r *http.Request) {
 		"version":       a.version,
 		"xray_running":  a.xr.Running(),
 		"xray_version":  a.xr.Version(),
+		"xray_error":    a.xr.LastError(),
 		"inbounds":      len(st.Inbounds),
 		"outbounds":     len(st.Outbounds),
 		"routing_rules": len(st.RoutingRules),

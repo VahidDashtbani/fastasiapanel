@@ -333,7 +333,7 @@
           statCard('Server Network', '<span class="num" style="font-size:15px">' + netSpd + '</span>', '<span class="num">' + netTot + '</span>') +
           '</div>' +
           '<div class="cards">' +
-          statCard('Xray Core Status', '<span class="dot ' + (s.xray_running ? 'ok' : '') + '"></span>' + (s.xray_running ? 'Running' : 'Stopped'), esc(s.xray_version || '')) +
+          statCard('Xray Core Status', '<span class="dot ' + (s.xray_running ? 'ok' : '') + '"></span>' + (s.xray_running ? 'Running' : 'Stopped'), esc(s.xray_version || '') + (s.xray_error ? '<br><span style="color:#e5484d;font-size:12px;word-break:break-word">' + esc(String(s.xray_error).slice(0, 300)) + '</span>' : '')) +
           statCard('Inbounds / Outbounds', '<span class="num">' + s.inbounds + ' / ' + (s.outbounds || 0) + '</span>', 'Routing Rules: <span class="num">' + (s.routing_rules || 0) + '</span>') +
           statCard('Clients (Online / Active)', '<span class="num">' + (s.online || 0) + ' / ' + s.active + '</span>', 'Total Clients: <span class="num">' + s.clients + '</span>') +
           statCard('Total Client Traffic', '<span class="num">' + fmtBytes(s.up + s.down) + '</span>', '↑ ' + fmtBytes(s.up) + ' · ↓ ' + fmtBytes(s.down)) +
