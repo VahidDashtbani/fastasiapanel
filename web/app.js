@@ -1198,10 +1198,14 @@ function renderRouting() {
   function openRuleModal(existingRule) {
     var r = existingRule || {};
     var isEdit = Boolean(r.id);
-    var obOpts = opt('direct', 'direct', r.outbound_tag || 'direct') + opt('blocked', 'blocked', r.outbound_tag || '');
+    var obOpts = '';
+    var seenOb = {};
     (state.outbounds || []).forEach(function (o) {
-      obOpts += opt(o.tag, o.tag + (o.remark ? ' (' + o.remark + ')' : ''), r.outbound_tag || '');
+      seenOb[o.tag] = true;
+      obOpts += opt(o.tag, o.tag + (o.remark ? ' (' + o.remark + ')' : ''), r.outbound_tag || 'direct');
     });
+    if (!seenOb['direct']) obOpts = opt('direct', 'direct', r.outbound_tag || 'direct') + obOpts;
+    if (!seenOb['blocked']) obOpts += opt('blocked', 'blocked', r.outbound_tag || '');
 
     var currentFirstIb = (r.inbound_tags && r.inbound_tags.length) ? r.inbound_tags[0] : '';
     var ibOpts = opt('', 'All Inbounds (Any)', currentFirstIb);
@@ -1227,12 +1231,6 @@ function renderRouting() {
         opt('udp', 'UDP', r.network || '') +
       '</select></label>' +
       '<label>Protocol (optional)<input class="ltr" name="protocol" value="' + esc((r.protocol || []).join(', ')) + '" placeholder="bittorrent,http,tls"></label>' +
-      '<label>Network<select name=\"network\">' +
-        opt('', 'Any (TCP + UDP)', r.network || '') +
-        opt('tcp', 'TCP', r.network || '') +
-        opt('udp', 'UDP', r.network || '') +
-      '</select></label>' +
-      '<label>Protocol (optional)<input class=\"ltr\" name=\"protocol\" value=\"' + esc((r.protocol || []).join(', ')) + '\" placeholder=\"bittorrent,http,tls\"></label>' +
       '</div>';
 
     openModal(isEdit ? 'Edit Routing Rule' : 'New Routing Rule', body, function (form, setErr) {

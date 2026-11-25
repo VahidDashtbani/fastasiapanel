@@ -212,6 +212,45 @@ func ensureBuiltinOutbounds(st *State) bool {
 	return true
 }
 
+func ensureBuiltinRoutingRules(st *State) bool {
+	hasScanBlock := false
+	hasBTBlock := false
+	for _, rr := range st.RoutingRules {
+		switch strings.TrimSpace(rr.ID) {
+		case "sys-block-abuse-ports":
+			hasScanBlock = true
+		case "sys-block-bittorrent":
+			hasBTBlock = true
+		}
+	}
+	if hasScanBlock && hasBTBlock {
+		return false
+	}
+	var prefix []RoutingRule
+	if !hasScanBlock {
+		prefix = append(prefix, RoutingRule{
+			ID:          "sys-block-abuse-ports",
+			Remark:      "Block Abuse & Scan Ports",
+			OutboundTag: "blocked",
+			Port:        "22,23,25,179,445,3389",
+			Priority:    10,
+			Enable:      true,
+		})
+	}
+	if !hasBTBlock {
+		prefix = append(prefix, RoutingRule{
+			ID:          "sys-block-bittorrent",
+			Remark:      "Block BitTorrent",
+			OutboundTag: "blocked",
+			Protocol:    []string{"bittorrent"},
+			Priority:    20,
+			Enable:      true,
+		})
+	}
+	st.RoutingRules = append(prefix, st.RoutingRules...)
+	return true
+}
+
 func normalize(st *State) {
 	if st.Inbounds == nil {
 		st.Inbounds = []Inbound{}
@@ -238,6 +277,7 @@ func normalize(st *State) {
 		st.Settings = map[string]string{}
 	}
 	ensureBuiltinOutbounds(st)
+	ensureBuiltinRoutingRules(st)
 }
 
 func clone(st State) (State, error) {
