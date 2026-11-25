@@ -1221,6 +1221,12 @@ function renderRouting() {
       '<label class="span2">IPs / CIDRs (comma-separated)<input class="ltr" name="ips" value="' + esc((r.ips || []).join(', ')) + '" placeholder="geoip:ir,1.1.1.1/32"></label>' +
       '<label>Destination Port (Optional)<input class="ltr" name="port" value="' + esc(r.port || '') + '" placeholder="80,443"></label>' +
       '<label>Priority (lower = higher priority)<input class="ltr" name="priority" type="number" step="1" value="' + (typeof r.priority === 'number' ? r.priority : 50) + '"></label>' +
+      '<label>Network<select name="network">' +
+        opt('', 'Any (TCP + UDP)', r.network || '') +
+        opt('tcp', 'TCP', r.network || '') +
+        opt('udp', 'UDP', r.network || '') +
+      '</select></label>' +
+      '<label>Protocol (optional)<input class="ltr" name="protocol" value="' + esc((r.protocol || []).join(', ')) + '" placeholder="bittorrent,http,tls"></label>' +
       '<label>Network<select name=\"network\">' +
         opt('', 'Any (TCP + UDP)', r.network || '') +
         opt('tcp', 'TCP', r.network || '') +
