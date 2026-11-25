@@ -272,6 +272,8 @@ func (a *App) Handler() http.Handler {
 
 	mux.HandleFunc("GET "+b+"/api/outbounds", req(a.listOutbounds))
 	mux.HandleFunc("POST "+b+"/api/outbounds", req(a.createOutbound))
+	mux.HandleFunc("PUT "+b+"/api/outbounds/{id}", req(a.updateOutbound))
+	mux.HandleFunc("POST "+b+"/api/outbounds/{id}", req(a.updateOutbound))
 	mux.HandleFunc("POST "+b+"/api/outbounds/{id}/toggle", req(a.toggleOutbound))
 	mux.HandleFunc("POST "+b+"/api/outbounds/{id}/test", req(a.testOutbound))
 	mux.HandleFunc("POST "+b+"/api/outbounds/test-all", req(a.testAllOutbounds))
@@ -1112,73 +1114,157 @@ func (a *App) listOutbounds(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, a.st.Snapshot().Outbounds)
 }
 
-func (a *App) createOutbound(w http.ResponseWriter, r *http.Request) {
+func parseOutboundRequest(w http.ResponseWriter, r *http.Request) (store.Outbound, int, bool) {
+	var raw map[string]json.RawMessage
+	if !decode(w, r, &raw) {
+		return store.Outbound{}, -1, false
+	}
+	idx := -1
+	if rawIdx, ok := raw["index"]; ok {
+		_ = json.Unmarshal(rawIdx, &idx)
+	}
+	targetBytes, err := json.Marshal(raw)
+	if err != nil {
+		fail(w, http.StatusBadRequest, "invalid json payload")
+		return store.Outbound{}, -1, false
+	}
+	if nested, ok := raw["outbound"]; ok && len(nested) > 0 {
+		targetBytes = nested
+	}
 	var req store.Outbound
-	if !decode(w, r, &req) {
-		return
+	if err := json.Unmarshal(targetBytes, &req); err != nil {
+		fail(w, http.StatusBadRequest, "invalid outbound payload: "+err.Error())
+		return store.Outbound{}, -1, false
 	}
 	req.Tag = strings.TrimSpace(req.Tag)
 	req.Remark = strings.TrimSpace(req.Remark)
 	req.Protocol = strings.TrimSpace(req.Protocol)
-	if req.Tag == "" || req.Protocol == "" {
-		fail(w, http.StatusBadRequest, "tag and protocol are required")
-		return
-	}
-	if req.Tag == "direct" || req.Tag == "blocked" || req.Tag == "api" {
-		fail(w, http.StatusBadRequest, "reserved outbound tag")
-		return
-	}
-	id, err := store.NewID()
-	if err != nil {
-		fail(w, http.StatusInternalServerError, "id generation failed")
-		return
-	}
-	req.ID = id
-	req.Enable = true
-	err = a.st.Update(func(s *store.State) error {
-		for _, o := range s.Outbounds {
-			if o.Tag == req.Tag {
-				return errors.New("outbound tag already exists")
+	req.Address = strings.TrimSpace(req.Address)
+
+	// Normalize raw Xray settings block if user pasted full Xray outbound JSON
+	if (req.Protocol == "socks" || req.Protocol == "http") && (req.Address == "" || req.Port == 0) && len(req.Settings) > 0 {
+		var s struct {
+			Servers []struct {
+				Address string `json:"address"`
+				Port    int    `json:"port"`
+				Users   []struct {
+					User string `json:"user"`
+					Pass string `json:"pass"`
+				} `json:"users"`
+			} `json:"servers"`
+		}
+		if json.Unmarshal(req.Settings, &s) == nil && len(s.Servers) > 0 {
+			req.Address = strings.TrimSpace(s.Servers[0].Address)
+			req.Port = s.Servers[0].Port
+			if len(s.Servers[0].Users) > 0 {
+				req.Username = s.Servers[0].Users[0].User
+				req.Password = s.Servers[0].Users[0].Pass
 			}
 		}
-		s.Outbounds = append(s.Outbounds, req)
-		return nil
-	})
-	a.finish(w, err, map[string]string{"id": id})
+	}
+	return req, idx, true
 }
 
-func (a *App) updateOutbound(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var req store.Outbound
-	if !decode(w, r, &req) {
-		return
-	}
-	req.Tag = strings.TrimSpace(req.Tag)
-	req.Remark = strings.TrimSpace(req.Remark)
-	req.Protocol = strings.TrimSpace(req.Protocol)
+func validateOutboundBasic(req store.Outbound) error {
 	if req.Tag == "" || req.Protocol == "" {
-		fail(w, http.StatusBadRequest, "tag and protocol are required")
-		return
+		return errors.New("tag and protocol are required")
 	}
 	if req.Tag == "direct" || req.Tag == "blocked" || req.Tag == "api" {
-		fail(w, http.StatusBadRequest, "reserved outbound tag")
+		return errors.New("reserved outbound tag")
+	}
+	if (req.Protocol == "socks" || req.Protocol == "http") && (req.Address == "" || req.Port <= 0 || req.Port > 65535) {
+		return errors.New("valid address and port are required for " + req.Protocol)
+	}
+	return nil
+}
+
+func (a *App) createOutbound(w http.ResponseWriter, r *http.Request) {
+	req, idx, ok := parseOutboundRequest(w, r)
+	if !ok {
 		return
 	}
+	if err := validateOutboundBasic(req); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var savedID string
 	err := a.st.Update(func(s *store.State) error {
-		for _, o := range s.Outbounds {
-			if o.ID != id && o.Tag == req.Tag {
-				return errors.New("outbound tag already exists")
-			}
+		if idx >= 0 && idx < len(s.Outbounds) {
+			req.ID = s.Outbounds[idx].ID
+			req.Enable = s.Outbounds[idx].Enable
+			s.Outbounds[idx] = req
+			savedID = req.ID
+			return nil
 		}
 		for i := range s.Outbounds {
-			if s.Outbounds[i].ID == id {
-				req.ID = id
+			if (req.ID != "" && s.Outbounds[i].ID == req.ID) || s.Outbounds[i].Tag == req.Tag {
+				req.ID = s.Outbounds[i].ID
 				req.Enable = s.Outbounds[i].Enable
 				s.Outbounds[i] = req
+				savedID = req.ID
 				return nil
 			}
 		}
-		return errNotFound
+		id, err := store.NewID()
+		if err != nil {
+			return errors.New("id generation failed")
+		}
+		req.ID = id
+		req.Enable = true
+		s.Outbounds = append(s.Outbounds, req)
+		savedID = id
+		return nil
+	})
+	a.finish(w, err, map[string]any{"ok": true, "id": savedID})
+}
+
+func (a *App) updateOutbound(w http.ResponseWriter, r *http.Request) {
+	ident := strings.TrimSpace(r.PathValue("id"))
+	req, idx, ok := parseOutboundRequest(w, r)
+	if !ok {
+		return
+	}
+	if err := validateOutboundBasic(req); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	err := a.st.Update(func(s *store.State) error {
+		targetIdx := -1
+		for i := range s.Outbounds {
+			if s.Outbounds[i].ID == ident || s.Outbounds[i].Tag == ident {
+				targetIdx = i
+				break
+			}
+		}
+		if targetIdx == -1 {
+			if n, convErr := strconv.Atoi(ident); convErr == nil && n >= 0 && n < len(s.Outbounds) {
+				targetIdx = n
+			} else if idx >= 0 && idx < len(s.Outbounds) {
+				targetIdx = idx
+			}
+		}
+		if targetIdx == -1 {
+			return errNotFound
+		}
+		for i, o := range s.Outbounds {
+			if i != targetIdx && o.Tag == req.Tag {
+				return errors.New("outbound tag already exists")
+			}
+		}
+		oldTag := s.Outbounds[targetIdx].Tag
+		req.ID = s.Outbounds[targetIdx].ID
+		req.Enable = s.Outbounds[targetIdx].Enable
+		s.Outbounds[targetIdx] = req
+
+		// Keep routing rules in sync if outbound tag was renamed
+		if oldTag != "" && oldTag != req.Tag {
+			for i := range s.RoutingRules {
+				if s.RoutingRules[i].OutboundTag == oldTag {
+					s.RoutingRules[i].OutboundTag = req.Tag
+				}
+			}
+		}
+		return nil
 	})
 	a.finish(w, err, map[string]bool{"ok": true})
 }
@@ -1355,21 +1441,32 @@ func (a *App) testAllOutbounds(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) deleteOutbound(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	ident := strings.TrimSpace(r.PathValue("id"))
 	err := a.st.Update(func(s *store.State) error {
-		found := false
-		kept := s.Outbounds[:0]
-		for _, o := range s.Outbounds {
-			if o.ID == id {
-				found = true
-				continue
+		targetIdx := -1
+		for i, o := range s.Outbounds {
+			if o.ID == ident || o.Tag == ident {
+				targetIdx = i
+				break
 			}
-			kept = append(kept, o)
 		}
-		if !found {
+		if targetIdx == -1 {
+			if n, convErr := strconv.Atoi(ident); convErr == nil && n >= 0 && n < len(s.Outbounds) {
+				targetIdx = n
+			}
+		}
+		if targetIdx == -1 {
 			return errNotFound
 		}
-		s.Outbounds = kept
+		deletedTag := s.Outbounds[targetIdx].Tag
+		s.Outbounds = append(s.Outbounds[:targetIdx], s.Outbounds[targetIdx+1:]...)
+
+		// Disable routing rules referencing the deleted outbound so Xray config test never fails
+		for i := range s.RoutingRules {
+			if s.RoutingRules[i].OutboundTag == deletedTag {
+				s.RoutingRules[i].Enable = false
+			}
+		}
 		return nil
 	})
 	a.finish(w, err, map[string]bool{"ok": true})
