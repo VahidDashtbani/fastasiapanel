@@ -1508,6 +1508,11 @@ func (a *App) createRouting(w http.ResponseWriter, r *http.Request) {
 	req.IPs = cleanSlice(req.IPs)
 	req.InboundTags = cleanSlice(req.InboundTags)
 	req.Protocol = cleanSlice(req.Protocol)
+	req.Network = strings.ToLower(strings.TrimSpace(req.Network))
+	if err := validateRule(req); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	id, err := store.NewID()
 	if err != nil {
@@ -1641,6 +1646,11 @@ func (a *App) updateRouting(w http.ResponseWriter, r *http.Request) {
 	req.IPs = cleanStringSlice(req.IPs)
 	req.InboundTags = cleanStringSlice(req.InboundTags)
 	req.Protocol = cleanStringSlice(req.Protocol)
+	req.Network = strings.ToLower(strings.TrimSpace(req.Network))
+	if err := validateRule(req); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	if req.OutboundTag == "" {
 		fail(w, http.StatusBadRequest, "outbound_tag is required")
@@ -1665,6 +1675,19 @@ func (a *App) updateRouting(w http.ResponseWriter, r *http.Request) {
 		return errNotFound
 	})
 	a.finish(w, err, map[string]bool{"ok": true})
+}
+
+func validateRule(r store.RoutingRule) error {
+	switch r.Network {
+	case "", "tcp", "udp", "tcp,udp":
+	default:
+		return errors.New("network must be tcp, udp or tcp,udp")
+	}
+	if r.OutboundTag == "blocked" && len(r.Domains) == 0 && len(r.IPs) == 0 &&
+		r.Port == "" && r.Network == "" && len(r.Protocol) == 0 {
+		return errors.New("a blocked rule needs at least one condition (domain, ip, port, network or protocol); otherwise it blocks all traffic")
+	}
+	return nil
 }
 
 func outboundTagExists(s *store.State, tag string) bool {
